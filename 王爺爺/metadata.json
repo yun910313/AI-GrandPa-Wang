@@ -1,0 +1,8 @@
+{
+  "name": "王爺爺",
+  "description": "專為長輩設計的智慧照顧系統，包含 SOS、AI 語音與影像辨識功能。",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

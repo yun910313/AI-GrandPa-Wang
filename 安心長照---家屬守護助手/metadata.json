@@ -1,0 +1,5 @@
+{
+  "name": "安心長照 - 家屬守護助手",
+  "description": "專為長照家屬設計的守護 App，整合就醫紀錄、用藥提醒、檢查結果及即時 GPS 定位，讓守護更安心。",
+  "requestFramePermissions": ["geolocation"]
+}

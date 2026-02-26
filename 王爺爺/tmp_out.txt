@@ -1,0 +1,13 @@
+[dotenv@17.3.1] injecting env (4) from .env -- tip: 🔐 prevent building .env in docker: https://dotenvx.com/prebuild
+[31mWebSocket server error: Port 24678 is already in use[39m
+[2m下午2:48:43[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m Re-optimizing dependencies because lockfile has changed
+王爺爺 Server running on http://localhost:3001
+Vite dev server on http://localhost:3000
+[2m下午2:49:34[22m [36m[1m[vite][22m[39m [32mvite.config.ts changed, restarting server...[39m
+[31mWebSocket server error: Port 24678 is already in use[39m
+[2m下午2:49:34[22m [36m[1m[vite][22m[39m server restarted.
+[2m下午3:12:26[22m [36m[1m[vite][22m[39m [32mvite.config.ts changed, restarting server...[39m
+[31mWebSocket server error: Port 24678 is already in use[39m
+[2m下午3:12:26[22m [36m[1m[vite][22m[39m server restarted.
+[2m下午9:23:01[22m [36m[1m[vite][22m[39m [32mvite.config.ts changed, restarting server...[39m
+[2m下午9:23:02[22m [36m[1m[vite][22m[39m server restarted.
