@@ -72,6 +72,10 @@ export interface ElderlyProfile {
   weight: string;
   primary_hospital: string;
   safe_zone_range?: number;
+  safe_zone_lat?: number;
+  safe_zone_lng?: number;
+  account?: string;
+  password?: string;
 }
 
 export interface EmergencyContact {

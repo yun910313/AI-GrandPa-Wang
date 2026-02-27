@@ -32,7 +32,20 @@ import { format } from 'date-fns';
 import { cn } from './lib/utils';
 import { MedicalRecord, Medication, TestResult, GPSLog, DoctorNote, VitalSigns, UserProfile, ElderlyProfile, EmergencyContact } from './types';
 
-// --- Utilities ---
+const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+  const R = 6371e3; // meters
+  const φ1 = lat1 * Math.PI / 180;
+  const φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180;
+  const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) *
+    Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c; // in meters
+};
 
 const safeFetch = async (url: string, setter: (data: any) => void) => {
   try {
@@ -175,7 +188,15 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
           <div className="flex-1">
             <div className="flex justify-between items-center mb-1">
               <span className="text-xs font-semibold text-indigo-600 uppercase tracking-wider">即時定位</span>
-              <Badge variant="success">安全區域內</Badge>
+              {selectedElderly && latestGps && selectedElderly.safe_zone_lat && selectedElderly.safe_zone_lng ? (
+                (() => {
+                  const dist = calculateDistance(latestGps.latitude, latestGps.longitude, selectedElderly.safe_zone_lat, selectedElderly.safe_zone_lng);
+                  const isSafe = dist <= (selectedElderly.safe_zone_range || 500);
+                  return <Badge variant={isSafe ? 'success' : 'danger'}>{isSafe ? '安全區域內' : `超出範圍 (${Math.round(dist)}m)`}</Badge>;
+                })()
+              ) : (
+                <Badge variant="warning">偵測中</Badge>
+              )}
             </div>
             <p className="text-slate-900 font-medium mb-1">{latestGps?.address || '讀取中...'}</p>
             <p className="text-slate-500 text-xs">最後更新: {latestGps ? format(new Date(latestGps.timestamp), 'HH:mm') : '--:--'}</p>
@@ -505,10 +526,11 @@ const MedicalRecordsView = ({ onBack, selectedId }: { onBack: () => void, select
   );
 };
 
-const MedicationView = ({ onBack, selectedId }: { onBack: () => void, selectedId: string | null }) => {
+const MedicationView = ({ onBack, selectedId, user }: { onBack: () => void, selectedId: string | null, user: any }) => {
   const [meds, setMeds] = useState<Medication[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     dosage: '',
@@ -523,20 +545,32 @@ const MedicationView = ({ onBack, selectedId }: { onBack: () => void, selectedId
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const url = editingId ? `/api/medications/${editingId}` : '/api/medications';
-    const method = editingId ? 'PUT' : 'POST';
+    if (submitting) return;
+    setSubmitting(true);
 
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...formData, elderly_id: selectedId })
-    });
+    try {
+      const url = editingId ? `/api/medications/${editingId}` : '/api/medications';
+      const method = editingId ? 'PUT' : 'POST';
 
-    if (res.ok) {
-      setIsAdding(false);
-      setEditingId(null);
-      setFormData({ name: '', dosage: '', reminder_time: '' });
-      fetchMeds();
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...formData, elderly_id: selectedId, user_id: user?.id })
+      });
+
+      if (res.ok) {
+        setIsAdding(false);
+        setEditingId(null);
+        setFormData({ name: '', dosage: '', reminder_time: '' });
+        fetchMeds();
+      } else {
+        const text = await res.text();
+        alert(`儲存失敗: ${text}`);
+      }
+    } catch (err: any) {
+      alert(`連線錯誤: ${err.message}`);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -607,7 +641,13 @@ const MedicationView = ({ onBack, selectedId }: { onBack: () => void, selectedId
               </div>
               <div className="flex gap-3">
                 <button type="button" onClick={() => setIsAdding(false)} className="flex-1 bg-slate-100 text-slate-600 font-bold py-3 rounded-xl">取消</button>
-                <button type="submit" className="flex-[2] bg-emerald-600 text-white font-bold py-3 rounded-xl shadow-lg shadow-emerald-100">儲存</button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="flex-[2] bg-emerald-600 text-white font-bold py-3 rounded-xl shadow-lg shadow-emerald-100 disabled:opacity-50 transition-all pointer-events-auto cursor-pointer"
+                >
+                  {submitting ? '儲存中...' : '儲存'}
+                </button>
               </div>
             </form>
           </motion.div>
@@ -900,9 +940,19 @@ const GPSView = ({ onBack, selectedId }: { onBack: () => void, selectedId: strin
 
         {/* Overlay info card */}
         <div className="absolute bottom-4 left-4 right-4">
-          <Card className="bg-white/90 backdrop-blur-md border-none shadow-xl">
+          <Card className={cn(
+            "bg-white/90 backdrop-blur-md border-none shadow-xl",
+            latest && elderly?.safe_zone_lat && elderly?.safe_zone_lng &&
+              calculateDistance(latest.latitude, latest.longitude, elderly.safe_zone_lat, elderly.safe_zone_lng) > (elderly.safe_zone_range || 500)
+              ? "border-l-4 border-l-rose-500" : ""
+          )}>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center text-white flex-shrink-0">
+              <div className={cn(
+                "w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0 transition-colors",
+                latest && elderly?.safe_zone_lat && elderly?.safe_zone_lng &&
+                  calculateDistance(latest.latitude, latest.longitude, elderly.safe_zone_lat, elderly.safe_zone_lng) > (elderly.safe_zone_range || 500)
+                  ? "bg-rose-600 animate-bounce" : "bg-indigo-600"
+              )}>
                 <User size={20} />
               </div>
               <div className="flex-1 min-w-0">
@@ -911,7 +961,15 @@ const GPSView = ({ onBack, selectedId }: { onBack: () => void, selectedId: strin
               </div>
               <div className="text-right text-[10px] text-slate-400 flex-shrink-0">
                 <p>{latest ? format(new Date(latest.timestamp), 'HH:mm') : '--:--'}</p>
-                <p className="text-emerald-600 font-bold">安全區域</p>
+                {latest && elderly?.safe_zone_lat && elderly?.safe_zone_lng ? (
+                  (() => {
+                    const dist = calculateDistance(latest.latitude, latest.longitude, elderly.safe_zone_lat, elderly.safe_zone_lng);
+                    const isSafe = dist <= (elderly.safe_zone_range || 500);
+                    return <p className={cn("font-bold", isSafe ? "text-emerald-600" : "text-rose-600")}>
+                      {isSafe ? "安全區域" : `危險！超出 ${Math.round(dist)}m`}
+                    </p>;
+                  })()
+                ) : <p className="text-slate-400">尚未設定圍籬</p>}
               </div>
             </div>
           </Card>
@@ -1207,7 +1265,7 @@ const EditProfileView = ({ onBack, user }: { onBack: () => void, user: any }) =>
   );
 };
 
-const EditElderlyView = ({ onBack }: { onBack: () => void }) => {
+const EditElderlyView = ({ onBack, user }: { onBack: () => void, user: any }) => {
   const [profiles, setProfiles] = useState<ElderlyProfile[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1224,6 +1282,10 @@ const EditElderlyView = ({ onBack }: { onBack: () => void }) => {
     primary_hospital: '',
     safe_zone_address: '',
     safe_zone_range: 500,
+    safe_zone_lat: undefined,
+    safe_zone_lng: undefined,
+    account: '',
+    password: '',
     medical_history: ''
   });
 
@@ -1249,7 +1311,7 @@ const EditElderlyView = ({ onBack }: { onBack: () => void }) => {
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(method === 'POST' ? { ...formData, associated_user_id: user?.id } : formData)
       });
 
       if (res.ok) {
@@ -1425,6 +1487,28 @@ const EditElderlyView = ({ onBack }: { onBack: () => void }) => {
               className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
             />
           </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">長輩登入帳號</label>
+              <input
+                type="text"
+                placeholder="例如: wang88"
+                value={formData.account || ''}
+                onChange={e => setFormData({ ...formData, account: e.target.value })}
+                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">長輩登入密碼</label>
+              <input
+                type="text"
+                placeholder="設定密碼"
+                value={formData.password || ''}
+                onChange={e => setFormData({ ...formData, password: e.target.value })}
+                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
+              />
+            </div>
+          </div>
           <div className="space-y-1">
             <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">電子圍籬安全地址</label>
             <input
@@ -1442,6 +1526,28 @@ const EditElderlyView = ({ onBack }: { onBack: () => void }) => {
               onChange={e => setFormData({ ...formData, safe_zone_range: Number(e.target.value) })}
               className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
             />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">中心緯度 (Latitude)</label>
+              <input
+                type="number" step="any"
+                placeholder="例如: 22.6273"
+                value={formData.safe_zone_lat ?? ''}
+                onChange={e => setFormData({ ...formData, safe_zone_lat: e.target.value === '' ? undefined : Number(e.target.value) })}
+                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">中心經度 (Longitude)</label>
+              <input
+                type="number" step="any"
+                placeholder="例如: 120.3014"
+                value={formData.safe_zone_lng ?? ''}
+                onChange={e => setFormData({ ...formData, safe_zone_lng: e.target.value === '' ? undefined : Number(e.target.value) })}
+                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
+              />
+            </div>
           </div>
           <div className="space-y-1">
             <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">過往病史</label>
@@ -1726,12 +1832,12 @@ export default function App() {
 
     switch (currentView) {
       case 'medical': return <MedicalRecordsView onBack={() => setCurrentView('dashboard')} selectedId={selectedElderlyId} />;
-      case 'meds': return <MedicationView onBack={() => setCurrentView('dashboard')} selectedId={selectedElderlyId} />;
+      case 'meds': return <MedicationView onBack={() => setCurrentView('dashboard')} selectedId={selectedElderlyId} user={user} />;
       case 'tests': return <TestResultsView onBack={() => setCurrentView('dashboard')} selectedId={selectedElderlyId} />;
       case 'gps': return <GPSView onBack={() => setCurrentView('dashboard')} selectedId={selectedElderlyId} />;
       case 'profile': return <ProfileView onBack={() => setCurrentView('dashboard')} onNavigate={setCurrentView} user={user} />;
       case 'edit-profile': return <EditProfileView onBack={() => setCurrentView('profile')} user={user} />;
-      case 'edit-elderly': return <EditElderlyView onBack={() => setCurrentView('profile')} />;
+      case 'edit-elderly': return <EditElderlyView onBack={() => setCurrentView('profile')} user={user} />;
       case 'edit-emergency': return <EditEmergencyView onBack={() => setCurrentView('profile')} />;
       default: return <Dashboard onNavigate={setCurrentView} selectedId={selectedElderlyId} onSelectId={(id) => {
         setSelectedElderlyId(id);
