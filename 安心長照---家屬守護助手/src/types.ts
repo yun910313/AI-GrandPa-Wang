@@ -74,8 +74,6 @@ export interface ElderlyProfile {
   safe_zone_range?: number;
   safe_zone_lat?: number;
   safe_zone_lng?: number;
-  account?: string;
-  password?: string;
 }
 
 export interface EmergencyContact {

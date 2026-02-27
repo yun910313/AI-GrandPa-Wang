@@ -1284,8 +1284,6 @@ const EditElderlyView = ({ onBack, user }: { onBack: () => void, user: any }) =>
     safe_zone_range: 500,
     safe_zone_lat: undefined,
     safe_zone_lng: undefined,
-    account: '',
-    password: '',
     medical_history: ''
   });
 
@@ -1486,28 +1484,6 @@ const EditElderlyView = ({ onBack, user }: { onBack: () => void, user: any }) =>
               onChange={e => setFormData({ ...formData, primary_hospital: e.target.value })}
               className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
             />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">長輩登入帳號</label>
-              <input
-                type="text"
-                placeholder="例如: wang88"
-                value={formData.account || ''}
-                onChange={e => setFormData({ ...formData, account: e.target.value })}
-                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">長輩登入密碼</label>
-              <input
-                type="text"
-                placeholder="設定密碼"
-                value={formData.password || ''}
-                onChange={e => setFormData({ ...formData, password: e.target.value })}
-                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
-              />
-            </div>
           </div>
           <div className="space-y-1">
             <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">電子圍籬安全地址</label>

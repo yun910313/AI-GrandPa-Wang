@@ -42,7 +42,7 @@ async function startServer() {
   app.post("/api/login", async (req, res) => {
     try {
       const { account, password } = req.body;
-      const user = await elderlyRepo.findByCredentials(account, password);
+      const user = await userService.authenticate(account, password);
       if (user) {
         res.json({ success: true, user: { id: user.id, username: user.account, name: user.name } });
       } else {
