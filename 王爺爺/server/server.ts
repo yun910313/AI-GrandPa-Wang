@@ -44,7 +44,7 @@ async function startServer() {
       const { account, password } = req.body;
       const user = await userService.authenticate(account, password);
       if (user) {
-        res.json({ success: true, user: { id: user.id, username: user.account, name: user.name } });
+        res.json({ success: true, user: { id: user.id, username: user.account, name: user.name, elderly_id: user.elderly_id } });
       } else {
         res.status(401).json({ success: false, message: "帳號或密碼錯誤" });
       }
@@ -303,7 +303,8 @@ async function startServer() {
 
   app.get("/api/emergency-contacts", async (req, res) => {
     try {
-      const contacts = await contactRepo.findAll();
+      const { elderly_id } = req.query;
+      const contacts = await contactRepo.findAll(elderly_id as string);
       res.json(contacts);
     } catch (error) {
       res.status(500).json({ error: "Internal Server Error" });

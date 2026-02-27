@@ -5,9 +5,10 @@ import { GoogleGenAI } from '@google/genai';
 
 interface MedicationListProps {
   onBack?: () => void;
+  elderlyId?: string;
 }
 
-const MedicationList: React.FC<MedicationListProps> = ({ onBack }) => {
+const MedicationList: React.FC<MedicationListProps> = ({ onBack, elderlyId }) => {
   const [meds, setMeds] = useState<Medication[]>([]);
 
   const [isVoiceActive, setIsVoiceActive] = useState(false);
@@ -31,7 +32,8 @@ const MedicationList: React.FC<MedicationListProps> = ({ onBack }) => {
 
   const fetchMeds = useCallback(async () => {
     try {
-      const response = await fetch('/api/medications');
+      const url = elderlyId ? `/api/medications?elderly_id=${elderlyId}` : '/api/medications';
+      const response = await fetch(url);
       const data = await response.json();
       setMeds(data);
     } catch (error) {
@@ -94,10 +96,15 @@ const MedicationList: React.FC<MedicationListProps> = ({ onBack }) => {
       const url = isUpdate ? `/api/medications/${editingMed.id}` : '/api/medications';
       const method = isUpdate ? 'PUT' : 'POST';
 
+      const payload = { ...editingMed };
+      if (elderlyId && !isUpdate) {
+        payload.elderly_id = elderlyId;
+      }
+
       await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingMed)
+        body: JSON.stringify(payload)
       });
 
       await fetchMeds();

@@ -4,6 +4,7 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'rec
 
 interface HealthMonitorProps {
   onBack?: () => void;
+  elderlyId?: string;
 }
 
 const hrData = [
@@ -16,7 +17,7 @@ const hrData = [
   { time: '20:00', hr: 78 },
 ];
 
-const HealthMonitor: React.FC<HealthMonitorProps> = ({ onBack }) => {
+const HealthMonitor: React.FC<HealthMonitorProps> = ({ onBack, elderlyId }) => {
   // 心率相關
   const [isMeasuringHr, setIsMeasuringHr] = useState(false);
   const [hrProgress, setHrProgress] = useState(0);

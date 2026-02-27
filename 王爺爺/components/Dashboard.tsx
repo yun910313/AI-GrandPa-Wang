@@ -5,9 +5,10 @@ import { UserProfile, EmergencyContact, AppTab, Medication } from '../types';
 interface DashboardProps {
   onVoiceCall: () => void;
   onNavigate: (tab: AppTab) => void;
+  elderlyId?: string;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate }) => {
+const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate, elderlyId }) => {
   const [showSOSConfirm, setShowSOSConfirm] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [isSOSActive, setIsSOSActive] = useState(false);
@@ -42,12 +43,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate }) => {
   // 獲取後端資料
   const fetchData = useCallback(async () => {
     try {
-      // 獲取長輩基本資料 (目前預設抓取第一筆)
-      const elderlyRes = await fetch('/api/elderly-profile');
+      // 獲取長輩基本資料
+      const url = elderlyId ? `/api/elderly-profile/${elderlyId}` : '/api/elderly-profile';
+      const elderlyRes = await fetch(url);
       const elderlyData = await elderlyRes.json();
 
       // 獲取緊急聯絡人
-      const contactRes = await fetch('/api/emergency-contacts');
+      const contactUrl = elderlyId ? `/api/emergency-contacts?elderly_id=${elderlyId}` : '/api/emergency-contacts';
+      const contactRes = await fetch(contactUrl);
       const contactData = await contactRes.json();
 
       if (elderlyData) {

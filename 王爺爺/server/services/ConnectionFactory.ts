@@ -15,12 +15,12 @@ export class ConnectionFactory {
                 },
             };
 
-            console.log(`æ­?œ¨??¥?°ä¼º?å™¨: ${config.server}, è³‡æ?åº? ${config.database}...`);
+            console.log(`å˜—è©¦é€£ç·šè‡³ä¼ºæœå™¨: ${config.server}, è³‡æ–™åº«: ${config.database}...`);
             const pool = await sql.connect(config);
-            console.log('è³‡æ?åº«é€?¥?å?ï¼?);
+            console.log('è³‡æ–™åº«é€£ç·šæˆåŠŸ');
             return pool;
         } catch (err) {
-            console.error('è³‡æ?åº«é€?¥å¤±æ?ï¼?, err);
+            console.error('è³‡æ–™åº«é€£ç·šå¤±æ•—', err);
             throw err;
         }
     }

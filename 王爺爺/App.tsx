@@ -62,17 +62,17 @@ const App: React.FC = () => {
   const renderContent = () => {
     switch (activeTab) {
       case AppTab.HOME:
-        return <Dashboard onVoiceCall={() => setActiveTab(AppTab.CHAT)} onNavigate={handleNavigate} />;
+        return <Dashboard onVoiceCall={() => setActiveTab(AppTab.CHAT)} onNavigate={handleNavigate} elderlyId={user.elderly_id} />;
       case AppTab.MEDS:
-        return <MedicationList onBack={goToHome} />;
+        return <MedicationList onBack={goToHome} elderlyId={user.elderly_id} />;
       case AppTab.HEALTH:
-        return <HealthMonitor onBack={goToHome} />;
+        return <HealthMonitor onBack={goToHome} elderlyId={user.elderly_id} />;
       case AppTab.CHAT:
         return <LiveVoiceChat onBack={goToHome} />;
       case AppTab.VISION:
         return <VisionAssistant onBack={goToHome} />;
       default:
-        return <Dashboard onVoiceCall={() => setActiveTab(AppTab.CHAT)} onNavigate={handleNavigate} />;
+        return <Dashboard onVoiceCall={() => setActiveTab(AppTab.CHAT)} onNavigate={handleNavigate} elderlyId={user.elderly_id} />;
     }
   };
 
