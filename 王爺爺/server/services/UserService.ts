@@ -1,23 +1,26 @@
 import UserRepository from '../repositories/UserRepository.js';
+import ElderlyProfileRepository from '../repositories/ElderlyProfileRepository.js';
 
 export class UserService {
     private userRepo: UserRepository;
+    private elderlyRepo: ElderlyProfileRepository;
 
     constructor() {
         this.userRepo = new UserRepository();
+        this.elderlyRepo = new ElderlyProfileRepository();
     }
 
     /**
-     * 驗證使用者登入
+     * 驗證長輩登入 (從 elderly_profiles 抓取)
      * @param account 帳號
      * @param password 密碼
      */
     async authenticate(account: string, password: string): Promise<any | null> {
-        return await this.userRepo.findByCredentials(account, password);
+        return await this.elderlyRepo.findByCredentials(account, password);
     }
 
     /**
-     * 建立使用者
+     * 建立使用者 (保留原本功能)
      * @param data 使用者資料
      * @returns 新增的使用者 ID
      */

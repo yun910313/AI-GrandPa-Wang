@@ -1,4 +1,4 @@
-import sql from 'mssql';
+﻿import sql from 'mssql';
 import { ConnectionFactory } from '../services/ConnectionFactory.js';
 
 export class ElderlyProfileRepository {
@@ -40,7 +40,7 @@ export class ElderlyProfileRepository {
             const result = await pool.request()
                 .input('account', sql.NVarChar(50), account)
                 .input('password', sql.NVarChar(255), password)
-                .query('SELECT TOP 1 id, name, account, age, gender FROM elderly_profiles WHERE account = @account AND password = @password');
+                .query('SELECT TOP 1 id, id AS elderly_id, name, account, age, gender FROM elderly_profiles WHERE account = @account AND password = @password');
             return result.recordset.length > 0 ? result.recordset[0] : null;
         } catch (err) {
             console.error('ElderlyProfileRepository.findByCredentials Error:', err);

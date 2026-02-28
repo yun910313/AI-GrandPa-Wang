@@ -1,18 +1,21 @@
 import sql from 'mssql';
-import { DbConfig } from '../config/DbConfig.js';
+import { getDbConfig } from '../config/DbConfig.js';
 
 export class ConnectionFactory {
     static async createConnection(): Promise<sql.ConnectionPool> {
         try {
+            const dbConf = getDbConfig(); // 每次連線時動態讀取，確保 dotenv 已載入
             const config: sql.config = {
-                server: DbConfig.server,
-                database: DbConfig.database,
-                user: DbConfig.user,
-                password: DbConfig.password,
+                server: dbConf.server,
+                database: dbConf.database,
+                user: dbConf.user,
+                password: dbConf.password,
                 options: {
-                    encrypt: DbConfig.options.encrypt,
-                    trustServerCertificate: DbConfig.options.trustServerCertificate,
+                    encrypt: dbConf.options.encrypt,
+                    trustServerCertificate: dbConf.options.trustServerCertificate,
                 },
+                connectionTimeout: 15000,
+                requestTimeout: 30000,
             };
 
             console.log(`嘗試連線至伺服器: ${config.server}, 資料庫: ${config.database}...`);
@@ -27,3 +30,4 @@ export class ConnectionFactory {
 }
 
 export default ConnectionFactory;
+

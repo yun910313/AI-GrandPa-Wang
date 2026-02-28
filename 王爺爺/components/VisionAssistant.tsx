@@ -48,6 +48,14 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
   const captureAndAnalyze = useCallback(async () => {
     if (!videoRef.current || !canvasRef.current || isAnalyzing) return;
 
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) {
+      const msg = "影像辨識功能尚未設定，請聯絡家屬協助設定 API 金鑰。";
+      setResult(msg);
+      speak(msg);
+      return;
+    }
+
     speak("正在啟動辨識，請稍微拿穩手機。");
     setIsAnalyzing(true);
     setResult("正在辨識中，請稍候...");
@@ -64,7 +72,7 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
     const base64Image = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey });
 
       let modePrompt = "";
       switch (mode) {
@@ -75,11 +83,11 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
         case 'find':
           modePrompt = `請在此場景中尋找「${findTarget || '眼鏡、鑰匙、遙控器'}」。如果看到了，請具體描述它的方位（如：在桌子的左上角、在電視櫃下方）。如果沒看到，請列出看到的所有物品。`;
           break;
-        case 'general': modePrompt = "請用溫暖的口臥描述場景。"; break;
+        case 'general': modePrompt = "請用溫暖的口吻描述這個場景，讓視力不好的長者也能理解。"; break;
       }
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-2.0-flash',
         contents: {
           parts: [
             { inlineData: { data: base64Image, mimeType: 'image/jpeg' } },
@@ -96,8 +104,11 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
       speak(summary);
     } catch (err: any) {
       console.error("辨識錯誤:", err);
-      setResult("連線異常，請稍後再試。");
-      speak("對不起，現在連線有點問題，請過一會再試一次。");
+      const errMsg = err?.message?.includes('API_KEY') || err?.message?.includes('401')
+        ? "API 金鑰設定有誤，請聯絡家屬處理。"
+        : "連線異常，請過一會再試一次。";
+      setResult(errMsg);
+      speak(errMsg);
     } finally {
       setIsAnalyzing(false);
     }
@@ -247,8 +258,22 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
           </p>
         </div>
 
-        <div className="absolute bottom-6 left-0 right-0 overflow-x-auto pb-6 px-4 no-scrollbar z-30">
-          <div className="flex gap-3 min-w-max">
+        <div className="absolute bottom-6 left-0 right-0 px-4 z-30">
+          {/* 已移至下方白板區 */}
+        </div>
+      </div>
+
+      <div
+        className={`bg-white rounded-t-[40px] shadow-2xl relative z-40 flex flex-col transition-all duration-500 ease-in-out ${isCollapsed ? 'h-24' : 'max-h-[65%] h-auto'
+          }`}
+      >
+        <button onClick={() => setIsCollapsed(!isCollapsed)} className="w-full py-4 flex flex-col items-center gap-1 group">
+          <div className="w-16 h-1.5 bg-slate-200 rounded-full group-hover:bg-slate-300 transition-colors"></div>
+        </button>
+
+        <div className="px-6 pb-8 flex flex-col gap-4 overflow-hidden h-full">
+          {/* 模式選擇 3 欄 Grid */}
+          <div className="grid grid-cols-3 gap-3 shrink-0">
             {modes.map((m) => (
               <button
                 key={m.id}
@@ -257,26 +282,17 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
                   speak(`切換到${m.label}模式`);
                   if (m.id !== 'find') setFindTarget('');
                 }}
-                className={`flex items-center gap-2 px-6 py-4 rounded-full font-black transition-all whitespace-nowrap ${mode === m.id ? `${m.color} text-white shadow-xl ring-4 ring-white/20 scale-105` : 'bg-white/10 text-white/80 backdrop-blur-lg border border-white/10'
+                className={`flex flex-col items-center justify-center gap-2 py-4 rounded-[24px] font-black transition-all ${mode === m.id
+                  ? `${m.color} text-white shadow-lg scale-[0.97]`
+                  : 'bg-slate-100 text-slate-500'
                   }`}
               >
-                <i className={`fas ${m.icon} text-lg`}></i>
-                {m.label}
+                <i className={`fas ${m.icon} text-2xl`}></i>
+                <span className="text-base">{m.label}</span>
               </button>
             ))}
           </div>
-        </div>
-      </div>
 
-      <div
-        className={`bg-white rounded-t-[40px] shadow-2xl relative z-40 flex flex-col transition-all duration-500 ease-in-out ${isCollapsed ? 'h-24' : 'max-h-[60%] h-auto'
-          }`}
-      >
-        <button onClick={() => setIsCollapsed(!isCollapsed)} className="w-full py-4 flex flex-col items-center gap-1 group">
-          <div className="w-16 h-1.5 bg-slate-200 rounded-full group-hover:bg-slate-300 transition-colors"></div>
-        </button>
-
-        <div className="px-6 pb-8 flex flex-col gap-4 overflow-hidden h-full">
           {!isCollapsed && (
             <div className="flex-1 overflow-y-auto space-y-4 pr-1">
               {isAnalyzing ? (
@@ -297,7 +313,7 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
               ) : (
                 <p
                   onClick={() => speak(mode === 'find' ? "請對準可能遺失物品的區域，然後按下方的立即辨識按鈕。" : "請對準物品並按下方的辨識按鈕。")}
-                  className="text-slate-400 text-center font-black py-10 cursor-pointer text-2xl"
+                  className="text-slate-400 text-center font-black py-6 cursor-pointer text-2xl"
                 >
                   {mode === 'find' ? '請對準遺失區域並辨識' : '請對準物品並按下方的按鈕'}
                 </p>

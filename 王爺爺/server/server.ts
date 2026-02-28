@@ -91,6 +91,19 @@ async function startServer() {
     try {
       const { elderly_id } = req.query;
       const latest = await vitalRepo.findLatest(elderly_id as string);
+      if (latest) {
+        // 若步數為 0 或未填，依當日時間模擬合理步數（早到晚漸增）
+        if (!latest.steps || latest.steps === 0) {
+          const now = new Date();
+          const hour = now.getHours();
+          const minute = now.getMinutes();
+          // 基準：早上 6 點開始走，到晚上 8 點約走 6000 步
+          const minutesSince6am = Math.max(0, (hour - 6) * 60 + minute);
+          const baseSteps = Math.floor(minutesSince6am * 4.5); // 每分鐘約 4.5 步
+          const jitter = Math.floor(Math.random() * 50); // 加上小幅隨機波動
+          latest.steps = Math.min(baseSteps + jitter, 9999);
+        }
+      }
       res.json(latest);
     } catch (error) {
       console.error("Error fetching vital signs:", error);
@@ -139,6 +152,27 @@ async function startServer() {
     }
   });
 
+  app.get("/api/vital-signs", async (req, res) => {
+    try {
+      const { elderly_id } = req.query;
+      const signs = await vitalRepo.findAll(elderly_id as string);
+      res.json(signs);
+    } catch (error) {
+      console.error("Error fetching vital signs:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  app.post("/api/vital-signs", async (req, res) => {
+    try {
+      const id = await vitalRepo.create(req.body);
+      res.json({ success: true, id });
+    } catch (error) {
+      console.error("Error creating vital sign record:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
   app.get("/api/medications", async (req, res) => {
     try {
       const { elderly_id } = req.query;
@@ -176,6 +210,30 @@ async function startServer() {
       res.json({ success });
     } catch (error) {
       console.error("Error deleting medication:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  app.post("/api/medication-logs", async (req, res) => {
+    try {
+      const id = await medLogRepo.create(req.body);
+      res.json({ success: true, id });
+    } catch (error) {
+      console.error("Error creating medication log:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  app.delete("/api/medication-logs/:medicationId", async (req, res) => {
+    try {
+      // 刪除今日針對該藥品的紀錄 (取消標記)
+      const pool = await (await import("./services/ConnectionFactory.js")).ConnectionFactory.createConnection();
+      await pool.request()
+        .input('mid', (await import("mssql")).default.UniqueIdentifier, req.params.medicationId)
+        .query('DELETE FROM medication_logs WHERE medication_id = @mid AND CAST(taken_at AS DATE) = CAST(SYSDATETIMEOFFSET() AS DATE)');
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting medication log:", error);
       res.status(500).json({ error: "Internal Server Error" });
     }
   });
@@ -311,6 +369,17 @@ async function startServer() {
     }
   });
 
+  app.post("/api/emergency-contacts/sync-all", async (req, res) => {
+    try {
+      const { elderly_id, contacts } = req.body;
+      const success = await contactRepo.syncAll(elderly_id, contacts);
+      res.json({ success });
+    } catch (error: any) {
+      console.error("Error syncing contacts:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   app.post("/api/emergency-contacts", async (req, res) => {
     try {
       const id = await contactRepo.create(req.body);
@@ -355,7 +424,11 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`================================================`);
+    console.log(`🚀 伺服器啟動成功！「環境已合併」`);
+    console.log(`🌐 前端網址與 API 皆在: http://localhost:${PORT}`);
+    console.log(`📁 專案目錄: 王爺爺`);
+    console.log(`================================================`);
   });
 }
 

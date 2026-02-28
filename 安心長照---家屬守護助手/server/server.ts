@@ -289,9 +289,9 @@ async function startServer() {
   app.post("/api/elderly-profile", async (req, res) => {
     try {
       const { associated_user_id, ...elderlyData } = req.body;
-      const id = await elderlyRepo.create(elderlyData);
+      const id = await elderlyRepo.create({ ...elderlyData, guardian_id: associated_user_id });
 
-      // 如果有提供關聯的使用者 ID，則更新使用者的 elderly_id
+      // 如果有提供關聯的使用者 ID，則更新使用者的 elderly_id (保留相容性)
       if (associated_user_id) {
         await userService.linkElderlyId(associated_user_id, id);
       }
@@ -305,7 +305,8 @@ async function startServer() {
 
   app.put("/api/elderly-profile/:id", async (req, res) => {
     try {
-      const success = await elderlyRepo.update(req.params.id, req.body);
+      const { associated_user_id, ...updateData } = req.body;
+      const success = await elderlyRepo.update(req.params.id, { ...updateData, guardian_id: associated_user_id });
       res.json({ success: true });
     } catch (error: any) {
       console.error("PUT /api/elderly-profile error:", error);
@@ -324,10 +325,21 @@ async function startServer() {
 
   app.get("/api/emergency-contacts", async (req, res) => {
     try {
-      const contacts = await contactRepo.findAll();
+      const { elderly_id } = req.query;
+      const contacts = await contactRepo.findAll(elderly_id as string);
       res.json(contacts);
     } catch (error) {
       res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  app.post("/api/emergency-contacts/update-orders", async (req, res) => {
+    try {
+      const { orders } = req.body;
+      const success = await contactRepo.updateOrders(orders);
+      res.json({ success });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
   });
 
@@ -375,7 +387,11 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`================================================`);
+    console.log(`🚀 伺服器啟動成功！「環境已合併」`);
+    console.log(`🌐 前端網址與 API 皆在: http://localhost:${PORT}`);
+    console.log(`📁 專案目錄: 安心長照---家屬守護助手`);
+    console.log(`================================================`);
   });
 }
 

@@ -1,10 +1,10 @@
-import sql from 'mssql';
+﻿import sql from 'mssql';
 import { ConnectionFactory } from '../services/ConnectionFactory.js';
 
 export class UserRepository {
     /**
-     * 驗�?使用?�登??
-     * @param account 帳�?
+     * 驗證使用者登入
+     * @param account 帳號
      * @param password 密碼
      */
     async findByCredentials(account: string, password: string): Promise<any | null> {
@@ -26,8 +26,8 @@ export class UserRepository {
     }
 
     /**
-     * ?��? ID ?�詢使用??
-     * @param id 使用??UUID
+     * 根據 ID 查詢使用者
+     * @param id 使用者 UUID
      */
     async findById(id: string): Promise<any | null> {
         let pool;
@@ -47,9 +47,9 @@ export class UserRepository {
     }
 
     /**
-     * ?��?使用??
-     * @param data 使用?��???
-     * @returns ?��??�使?��?ID
+     * 新增使用者
+     * @param data 使用者資料
+     * @returns 新增的使用者 ID
      */
     async create(data: any): Promise<string> {
         let pool;
@@ -78,9 +78,9 @@ export class UserRepository {
     }
 
     /**
-     * ?�新使用??
-     * @param id 使用??ID
-     * @param data ?�新資�?
+     * 更新使用者
+     * @param id 使用者 ID
+     * @param data 更新資料
      */
     async update(id: string, data: any): Promise<boolean> {
         let pool;
@@ -113,8 +113,8 @@ export class UserRepository {
     }
 
     /**
-     * ?�除使用??
-     * @param id 使用??ID
+     * 刪除使用者
+     * @param id 使用者 ID
      */
     async delete(id: string): Promise<boolean> {
         let pool;

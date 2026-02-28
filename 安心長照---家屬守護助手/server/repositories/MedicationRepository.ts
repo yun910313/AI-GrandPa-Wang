@@ -11,21 +11,28 @@ export class MedicationRepository {
             pool = await ConnectionFactory.createConnection();
             let query = `
                 SELECT 
-                    id, 
-                    name, 
-                    CAST(dosage_amount AS VARCHAR) + dosage_unit as dosage,
-                    dosage_amount,
-                    dosage_unit,
-                    CAST(reminder_time AS VARCHAR(5)) as reminder_time,
-                    is_active
-                FROM medications
+                    m.id, 
+                    m.name, 
+                    CAST(m.dosage_amount AS VARCHAR) + m.dosage_unit as dosage,
+                    m.dosage_amount,
+                    m.dosage_unit,
+                    CAST(m.reminder_time AS VARCHAR(5)) as reminder_time,
+                    m.is_active,
+                    CASE WHEN ml.id IS NOT NULL THEN 1 ELSE 0 END AS is_taken
+                FROM medications m
+                LEFT JOIN (
+                    SELECT medication_id, MIN(id) as id
+                    FROM medication_logs 
+                    WHERE CAST(taken_at AS DATE) = CAST(SYSDATETIMEOFFSET() AS DATE)
+                    GROUP BY medication_id
+                ) ml ON m.id = ml.medication_id
             `;
             const request = pool.request();
             if (elderlyId) {
-                query += ' WHERE elderly_id = @elderlyId';
+                query += ' WHERE m.elderly_id = @elderlyId';
                 request.input('elderlyId', sql.UniqueIdentifier, elderlyId);
             }
-            query += ' ORDER BY reminder_time ASC';
+            query += ' ORDER BY m.reminder_time ASC';
             const result = await request.query(query);
             return result.recordset;
         } catch (err) {
@@ -44,7 +51,6 @@ export class MedicationRepository {
         try {
             pool = await ConnectionFactory.createConnection();
 
-            // 嘗試從字串拆分劑量 (例如 "5mg" -> 5, "mg")
             let amount = 0;
             let unit = '';
             const match = data.dosage?.match(/^(\d+(?:\.\d+)?)\s*(.*)$/);
@@ -55,26 +61,20 @@ export class MedicationRepository {
                 unit = data.dosage || '';
             }
 
-            // 轉換時間字串為 Date 物件 (mssql Time 類型需要)
-            let reminderTime = null;
-            if (data.reminder_time) {
-                console.log('MedicationRepository.create: Original reminder_time:', data.reminder_time);
-                reminderTime = new Date(`1970-01-01T${data.reminder_time}:00`);
-                console.log('MedicationRepository.create: Converted reminderTime:', reminderTime);
-            }
+            const timeStr = data.reminder_time ? (data.reminder_time.length === 5 ? `${data.reminder_time}:00` : data.reminder_time) : '08:00:00';
 
             const result = await pool.request()
                 .input('elderly_id', sql.UniqueIdentifier, data.elderly_id || '00000000-0000-0000-0000-000000000000')
                 .input('user_id', sql.UniqueIdentifier, data.user_id || '00000000-0000-0000-0000-000000000000')
                 .input('name', sql.NVarChar(255), data.name)
-                .input('reminder_time', sql.Time, reminderTime)
+                .input('reminder_time_str', sql.VarChar(10), timeStr)
                 .input('dosage_amount', sql.Decimal(10, 2), amount)
                 .input('dosage_unit', sql.NVarChar(50), unit)
                 .input('is_active', sql.Bit, 1)
                 .query(`
                     INSERT INTO medications (elderly_id, user_id, name, reminder_time, dosage_amount, dosage_unit, is_active)
                     OUTPUT INSERTED.id
-                    VALUES (@elderly_id, @user_id, @name, @reminder_time, @dosage_amount, @dosage_unit, @is_active)
+                    VALUES (@elderly_id, @user_id, @name, CAST(@reminder_time_str AS TIME), @dosage_amount, @dosage_unit, @is_active)
                 `);
             return result.recordset[0].id;
         } catch (err) {
@@ -103,24 +103,20 @@ export class MedicationRepository {
                 unit = data.dosage || '';
             }
 
-            // 轉換時間字串為 Date 物件
-            let reminderTime = null;
-            if (data.reminder_time) {
-                reminderTime = new Date(`1970-01-01T${data.reminder_time}:00`);
-            }
+            const timeStr = data.reminder_time ? (data.reminder_time.length === 5 ? `${data.reminder_time}:00` : data.reminder_time) : '08:00:00';
 
             const result = await pool.request()
                 .input('id', sql.UniqueIdentifier, id)
                 .input('elderly_id', sql.UniqueIdentifier, data.elderly_id || '00000000-0000-0000-0000-000000000000')
                 .input('name', sql.NVarChar(255), data.name)
-                .input('reminder_time', sql.Time, reminderTime)
+                .input('reminder_time_str', sql.VarChar(10), timeStr)
                 .input('dosage_amount', sql.Decimal(10, 2), amount)
                 .input('dosage_unit', sql.NVarChar(50), unit)
                 .query(`
                     UPDATE medications SET
                         elderly_id = @elderly_id,
                         name = @name,
-                        reminder_time = @reminder_time,
+                        reminder_time = CAST(@reminder_time_str AS TIME),
                         dosage_amount = @dosage_amount,
                         dosage_unit = @dosage_unit,
                         updated_at = SYSDATETIMEOFFSET()

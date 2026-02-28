@@ -109,6 +109,7 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
   const [vitals, setVitals] = useState<VitalSigns | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [profiles, setProfiles] = useState<ElderlyProfile[]>([]);
+  const [medicalRecords, setMedicalRecords] = useState<MedicalRecord[]>([]);
 
   useEffect(() => {
     safeFetch('/api/elderly-profiles', (data) => {
@@ -123,6 +124,7 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
     safeFetch(`/api/medications?elderly_id=${currentId}`, setMeds);
     safeFetch(`/api/vital-signs-latest?elderly_id=${currentId}`, setVitals);
     safeFetch(`/api/user-profile?id=${user?.id}`, setUserProfile);
+    safeFetch(`/api/medical-records?elderly_id=${currentId}`, setMedicalRecords);
 
     const interval = setInterval(() => {
       safeFetch(`/api/vital-signs-latest?elderly_id=${currentId}`, setVitals);
@@ -251,7 +253,11 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
           </div>
           <div>
             <h3 className="font-semibold text-slate-900 text-sm">就醫紀錄</h3>
-            <p className="text-slate-500 text-[10px]">上次: 2/15 榮總</p>
+            <p className="text-slate-500 text-[10px]">
+              {medicalRecords.length > 0
+                ? `上次: ${format(new Date(medicalRecords[0].date), 'M/d')} ${medicalRecords[0].hospital}`
+                : '尚無紀錄'}
+            </p>
           </div>
         </Card>
 
@@ -261,7 +267,9 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
           </div>
           <div>
             <h3 className="font-semibold text-slate-900 text-sm">用藥資訊</h3>
-            <p className="text-slate-500 text-[10px]">{meds.length} 種藥物服用中</p>
+            <p className="text-slate-500 text-[10px]">
+              {meds.filter(m => m.is_taken === 1).length} 已吃 / {meds.filter(m => m.is_taken !== 1).length} 尚未吃
+            </p>
           </div>
         </Card>
 
@@ -675,7 +683,10 @@ const MedicationView = ({ onBack, selectedId, user }: { onBack: () => void, sele
                   <Pill size={24} />
                 </div>
                 <div className="flex-1">
-                  <h3 className="font-bold text-slate-900">{med.name}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-slate-900">{med.name}</h3>
+                    {med.is_taken === 1 && <Badge variant="success">今日已服</Badge>}
+                  </div>
                   <p className="text-xs text-slate-500">{med.dosage} | {med.reminder_time}</p>
                 </div>
                 <div className="flex flex-col gap-1 items-end">
@@ -1306,10 +1317,15 @@ const EditElderlyView = ({ onBack, user }: { onBack: () => void, user: any }) =>
       const url = editingId ? `/api/elderly-profile/${editingId}` : '/api/elderly-profile';
       const method = editingId ? 'PUT' : 'POST';
 
+      const body = {
+        ...formData,
+        associated_user_id: user?.id
+      };
+
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(method === 'POST' ? { ...formData, associated_user_id: user?.id } : formData)
+        body: JSON.stringify(body)
       });
 
       if (res.ok) {
@@ -1534,6 +1550,29 @@ const EditElderlyView = ({ onBack, user }: { onBack: () => void, user: any }) =>
               className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none resize-none"
             />
           </div>
+          <div className="space-y-4 pt-4 border-t border-slate-100">
+            <h4 className="text-sm font-bold text-slate-900">王爺爺系統登入設定</h4>
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">登入帳號</label>
+              <input
+                type="text"
+                placeholder="建議使用手機號碼或英文帳號"
+                value={formData.account || ''}
+                onChange={e => setFormData({ ...formData, account: e.target.value })}
+                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">登入密碼</label>
+              <input
+                type="password"
+                placeholder={editingId ? "若不修改請留空" : "請輸入密碼"}
+                value={formData.password || ''}
+                onChange={e => setFormData({ ...formData, password: e.target.value })}
+                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
+              />
+            </div>
+          </div>
           <motion.button
             whileTap={{ scale: 0.98 }}
             type="submit"
@@ -1582,27 +1621,40 @@ const EditElderlyView = ({ onBack, user }: { onBack: () => void, user: any }) =>
     </motion.div>
   );
 };
-const EditEmergencyView = ({ onBack }: { onBack: () => void }) => {
+const EditEmergencyView = ({ onBack, user, selectedId }: { onBack: () => void, user: any, selectedId: string | null }) => {
   const [contacts, setContacts] = useState<EmergencyContact[]>([]);
+  const [elderly, setElderly] = useState<ElderlyProfile | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [formData, setFormData] = useState({ name: '', relationship: '', phone: '' });
 
-  const fetchContacts = () => safeFetch('/api/emergency-contacts', setContacts);
+  const fetchContacts = () => {
+    if (!selectedId) return;
+    safeFetch(`/api/emergency-contacts?elderly_id=${selectedId}`, setContacts);
+  };
 
   useEffect(() => {
     fetchContacts();
-  }, []);
+    if (selectedId) {
+      safeFetch(`/api/elderly-profile/${selectedId}`, setElderly);
+    }
+  }, [user?.id, selectedId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const url = editingId ? `/api/emergency-contacts/${editingId}` : '/api/emergency-contacts';
     const method = editingId ? 'PUT' : 'POST';
 
+    const body = {
+      ...formData,
+      guardian_id: user?.id,
+      elderly_id: selectedId
+    };
+
     const res = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(formData)
+      body: JSON.stringify(body)
     });
 
     if (res.ok) {
@@ -1632,6 +1684,7 @@ const EditEmergencyView = ({ onBack }: { onBack: () => void }) => {
           <ArrowLeft size={20} />
         </button>
         <h1 className="text-xl font-bold text-slate-900">
+          {elderly && <span className="text-emerald-600 block text-xs font-bold uppercase tracking-widest mb-1">{elderly.name} 的管理區</span>}
           {isAdding ? (editingId ? '編輯聯絡人' : '新增聯絡人') : '緊急聯絡人'}
         </h1>
       </div>
@@ -1814,7 +1867,7 @@ export default function App() {
       case 'profile': return <ProfileView onBack={() => setCurrentView('dashboard')} onNavigate={setCurrentView} user={user} />;
       case 'edit-profile': return <EditProfileView onBack={() => setCurrentView('profile')} user={user} />;
       case 'edit-elderly': return <EditElderlyView onBack={() => setCurrentView('profile')} user={user} />;
-      case 'edit-emergency': return <EditEmergencyView onBack={() => setCurrentView('profile')} />;
+      case 'edit-emergency': return <EditEmergencyView onBack={() => setCurrentView('profile')} user={user} selectedId={selectedElderlyId} />;
       default: return <Dashboard onNavigate={setCurrentView} selectedId={selectedElderlyId} onSelectId={(id) => {
         setSelectedElderlyId(id);
         localStorage.setItem('selectedElderlyId', id.toString());

@@ -19,6 +19,7 @@ const MedicationList: React.FC<MedicationListProps> = ({ onBack, elderlyId }) =>
   // 編輯相關狀態
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingMed, setEditingMed] = useState<Medication | null>(null);
+  const [isAdding, setIsAdding] = useState(false);
 
   const speak = useCallback((text: string) => {
     if ('speechSynthesis' in window) {
@@ -47,15 +48,23 @@ const MedicationList: React.FC<MedicationListProps> = ({ onBack, elderlyId }) =>
 
   const toggleTaken = async (med: Medication) => {
     try {
-      const newState = !med.taken;
-      await fetch(`/api/medications/${med.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...med, taken: newState })
-      });
+      const newState = med.is_taken === 1 ? 0 : 1;
+      if (newState === 1) {
+        // 新增紀錄
+        await fetch('/api/medication-logs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ medication_id: med.id, status: 'taken' })
+        });
+      } else {
+        // 刪除紀錄 (取消標記)
+        await fetch(`/api/medication-logs/${med.id}`, {
+          method: 'DELETE'
+        });
+      }
 
-      setMeds(prev => prev.map(m => m.id === med.id ? { ...m, taken: newState } : m));
-      speak(newState ? `太棒了！已經幫您記好囉，${med.name}吃過啦。` : `已取消標記${med.name}`);
+      setMeds(prev => prev.map(m => m.id === med.id ? { ...m, is_taken: newState } : m));
+      speak(newState === 1 ? `太棒了！已經幫您記好囉，${med.name}吃過啦。` : `已取消標記${med.name}`);
     } catch (error) {
       console.error('Toggle taken error:', error);
     }
@@ -68,62 +77,76 @@ const MedicationList: React.FC<MedicationListProps> = ({ onBack, elderlyId }) =>
 
   const openEdit = (med: Medication) => {
     setEditingMed({ ...med });
+    setIsAdding(false);
     setShowEditModal(true);
     speak(`正在編輯${med.name}`);
   };
 
   const openAdd = () => {
-    const newMed: any = {
+    const newMed: Medication = {
+      id: '',
       name: '',
       reminder_time: '08:00',
       dosage: '1 顆',
-      taken: false
+      is_taken: 0
     };
     setEditingMed(newMed);
+    setIsAdding(true);
     setShowEditModal(true);
-    speak("新增一項藥品提醒");
+    speak("好的，那我們來新增一項藥品提醒吧。");
   };
 
   const saveMed = async () => {
     if (!editingMed) return;
     if (!editingMed.name.trim()) {
-      speak("請輸入藥品名稱");
+      speak("王爺爺，藥品名稱還沒寫喔。");
       return;
     }
 
     try {
-      const isUpdate = !!editingMed.id;
+      const isUpdate = !isAdding && !!editingMed.id;
       const url = isUpdate ? `/api/medications/${editingMed.id}` : '/api/medications';
       const method = isUpdate ? 'PUT' : 'POST';
 
-      const payload = { ...editingMed };
-      if (elderlyId && !isUpdate) {
-        payload.elderly_id = elderlyId;
-      }
+      const payload: any = {
+        name: editingMed.name,
+        reminder_time: editingMed.reminder_time,
+        dosage: editingMed.dosage,
+        elderly_id: elderlyId || ''
+      };
 
-      await fetch(url, {
+      const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
 
+      if (!res.ok) {
+        const errBody = await res.text();
+        console.error('Server error:', errBody);
+        throw new Error(`Server returned ${res.status}`);
+      }
+
       await fetchMeds();
       setShowEditModal(false);
-      speak(`已儲存${editingMed.name}的提醒`);
+      setIsAdding(false);
+      speak(`太棒了，您的${editingMed.name}提醒已經記好囉！`);
     } catch (error) {
       console.error('Save med error:', error);
-      speak("儲存失敗");
+      speak("儲存失敗，請再試一次。");
     }
   };
 
   const deleteMed = async (id: number | string) => {
     try {
-      await fetch(`/api/medications/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/medications/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Delete failed');
       await fetchMeds();
       setShowEditModal(false);
-      speak("已刪除該藥品提醒");
+      speak("好的，這項藥品提醒已經幫您刪掉了。");
     } catch (error) {
       console.error('Delete med error:', error);
+      speak("刪除失敗。");
     }
   };
 
@@ -148,7 +171,7 @@ const MedicationList: React.FC<MedicationListProps> = ({ onBack, elderlyId }) =>
     setAiStatus("正在思考中...");
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const currentStatus = meds.map(m => `[ID:${m.id}] ${m.name}(時間:${m.reminder_time}, 狀態:${m.taken ? '已標記吃過' : '還沒吃'})`).join(', ');
+      const currentStatus = meds.map(m => `[ID:${m.id}] ${m.name}(時間:${m.reminder_time}, 狀態:${m.is_taken === 1 ? '已標記吃過' : '還沒吃'})`).join(', ');
 
       const prompt = `
         你是一位極其親切、溫暖、有耐心的「銀髮族暖心管家」。
@@ -199,7 +222,7 @@ const MedicationList: React.FC<MedicationListProps> = ({ onBack, elderlyId }) =>
 
   const startVoiceAssistant = () => {
     setIsVoiceActive(true);
-    const pending = meds.filter(m => !m.taken);
+    const pending = meds.filter(m => m.is_taken !== 1); // Changed !m.taken to m.is_taken !== 1
     const greeting = pending.length > 0
       ? `您好呀！我看到您還有「${pending[0].name}」還沒吃，請問您吃了嗎？`
       : "今天的藥都乖乖吃完囉，您真的太棒了！還有什麼我可以幫您的嗎？";
@@ -209,12 +232,23 @@ const MedicationList: React.FC<MedicationListProps> = ({ onBack, elderlyId }) =>
 
   return (
     <div className="p-4 sm:p-6 space-y-6 sm:space-y-8 pb-32">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-3xl sm:text-4xl font-black text-slate-800 tracking-tight">今日服藥</h2>
+      <div className="flex justify-between items-center mb-4 sm:mb-6">
+        <div className="flex items-center gap-4 sm:gap-6">
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="w-12 h-12 flex items-center justify-center bg-white rounded-full text-slate-500 shadow-sm active:bg-slate-100"
+            >
+              <i className="fas fa-chevron-left text-xl"></i>
+            </button>
+          )}
+          <h2 className="text-3xl sm:text-5xl font-black text-slate-800 tracking-tight">服藥清單</h2>
+        </div>
         <div className="flex gap-2">
           <button
             onClick={openAdd}
-            className="w-12 h-12 sm:w-14 sm:h-14 bg-blue-600 text-white rounded-full flex items-center justify-center text-xl sm:text-2xl shadow-lg active:scale-90 transition-all"
+            className="w-14 h-14 bg-blue-600 text-white rounded-full flex items-center justify-center text-2xl shadow-lg active:scale-95 transition-all"
+            title="新增提醒"
           >
             <i className="fas fa-plus"></i>
           </button>
@@ -280,19 +314,19 @@ const MedicationList: React.FC<MedicationListProps> = ({ onBack, elderlyId }) =>
               handleMedClick(med);
               toggleTaken(med);
             }}
-            className={`p-5 sm:p-8 rounded-[32px] sm:rounded-[48px] flex items-center justify-between transition-all border-4 cursor-pointer active:scale-[0.98] ${med.taken
+            className={`p-5 sm:p-8 rounded-[32px] sm:rounded-[48px] flex items-center justify-between transition-all border-4 cursor-pointer active:scale-[0.98] ${med.is_taken === 1
               ? 'bg-slate-50 border-slate-100 opacity-60'
               : 'bg-white border-blue-200 shadow-xl ring-4 ring-blue-50/50'
               }`}
           >
             <div className="flex items-center gap-4 sm:gap-8 overflow-hidden">
-              <div className={`shrink-0 w-16 h-16 sm:w-24 sm:h-24 rounded-2xl sm:rounded-[32px] flex items-center justify-center text-3xl sm:text-5xl ${med.taken ? 'bg-slate-200 text-slate-400' : 'bg-blue-600 text-white shadow-2xl rotate-3'
+              <div className={`shrink-0 w-16 h-16 sm:w-24 sm:h-24 rounded-2xl sm:rounded-[32px] flex items-center justify-center text-3xl sm:text-5xl ${med.is_taken === 1 ? 'bg-slate-200 text-slate-400' : 'bg-blue-600 text-white shadow-2xl rotate-3'
                 }`}>
-                <i className={`fas ${med.taken ? 'fa-check-circle' : 'fa-pills'}`}></i>
+                <i className={`fas ${med.is_taken === 1 ? 'fa-check-circle' : 'fa-pills'}`}></i>
               </div>
               <div className="space-y-1 sm:space-y-3 min-w-0">
                 <div className="flex items-center gap-2 sm:gap-4">
-                  <h4 className={`text-2xl sm:text-4xl font-black ${med.taken ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
+                  <h4 className={`text-2xl sm:text-4xl font-black ${med.is_taken === 1 ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
                     {med.name}
                   </h4>
                   <button
@@ -314,9 +348,9 @@ const MedicationList: React.FC<MedicationListProps> = ({ onBack, elderlyId }) =>
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                toggleTaken(med.id);
+                toggleTaken(med);
               }}
-              className={`shrink-0 w-14 h-14 sm:w-20 sm:h-20 rounded-full border-4 flex items-center justify-center transition-all ${med.taken ? 'bg-emerald-500 border-emerald-500 text-white shadow-lg' : 'border-slate-200 text-slate-200'
+              className={`shrink-0 w-14 h-14 sm:w-20 sm:h-20 rounded-full border-4 flex items-center justify-center transition-all ${med.is_taken === 1 ? 'bg-emerald-500 border-emerald-500 text-white shadow-lg' : 'border-slate-200 text-slate-200'
                 }`}
             >
               <i className="fas fa-check text-3xl sm:text-5xl"></i>
@@ -325,78 +359,80 @@ const MedicationList: React.FC<MedicationListProps> = ({ onBack, elderlyId }) =>
         ))}
       </div>
 
-      {showEditModal && editingMed && (
-        <div className="fixed inset-0 bg-slate-900/80 z-50 flex items-end sm:items-center justify-center backdrop-blur-md p-4">
-          <div className="bg-white rounded-t-[32px] sm:rounded-[60px] p-6 sm:p-12 w-full max-w-xl shadow-2xl flex flex-col animate-in slide-in-from-bottom duration-500 max-h-[95vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-6 sm:mb-10">
-              <h3 className="text-3xl sm:text-4xl font-black text-slate-800 tracking-tight">{meds.find(m => m.id === editingMed.id) ? '修改提醒' : '新增提醒'}</h3>
-              <button onClick={() => setShowEditModal(false)} className="text-slate-300 text-4xl sm:text-5xl active:text-slate-500">
-                <i className="fas fa-times-circle"></i>
-              </button>
-            </div>
-
-            <div className="space-y-8 sm:space-y-12 mb-10 sm:mb-16">
-              <div className="space-y-3 sm:space-y-5">
-                <label className="block text-xl sm:text-2xl font-black text-slate-400">藥品名稱</label>
-                <input
-                  type="text"
-                  value={editingMed.name}
-                  onChange={(e) => setEditingMed({ ...editingMed, name: e.target.value })}
-                  className="w-full px-6 py-4 sm:px-10 sm:py-6 bg-slate-50 border-4 border-slate-100 rounded-2xl sm:rounded-[36px] font-black text-2xl sm:text-3xl focus:border-blue-500 focus:bg-white transition-all outline-none shadow-sm"
-                  placeholder="例如：降血壓藥"
-                />
+      {
+        showEditModal && editingMed && (
+          <div className="fixed inset-0 bg-slate-900/80 z-50 flex items-end sm:items-center justify-center backdrop-blur-md p-4">
+            <div className="bg-white rounded-t-[32px] sm:rounded-[60px] p-6 sm:p-12 w-full max-w-xl shadow-2xl flex flex-col animate-in slide-in-from-bottom duration-500 max-h-[95vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-6 sm:mb-10">
+                <h3 className="text-3xl sm:text-4xl font-black text-slate-800 tracking-tight">{meds.find(m => m.id === editingMed.id) ? '修改提醒' : '新增提醒'}</h3>
+                <button onClick={() => setShowEditModal(false)} className="text-slate-300 text-4xl sm:text-5xl active:text-slate-500">
+                  <i className="fas fa-times-circle"></i>
+                </button>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-10">
+              <div className="space-y-8 sm:space-y-12 mb-10 sm:mb-16">
                 <div className="space-y-3 sm:space-y-5">
-                  <label className="block text-xl sm:text-2xl font-black text-slate-400">提醒時間</label>
-                  <input
-                    type="time"
-                    value={editingMed.reminder_time}
-                    onChange={(e) => setEditingMed({ ...editingMed, reminder_time: e.target.value })}
-                    className="w-full px-6 py-4 sm:px-10 sm:py-6 bg-slate-50 border-4 border-slate-100 rounded-2xl sm:rounded-[36px] font-black text-2xl sm:text-3xl focus:border-blue-500 focus:bg-white transition-all outline-none shadow-sm"
-                  />
-                </div>
-                <div className="space-y-3 sm:space-y-5">
-                  <label className="block text-xl sm:text-2xl font-black text-slate-400">每次劑量</label>
+                  <label className="block text-xl sm:text-2xl font-black text-slate-400">藥品名稱</label>
                   <input
                     type="text"
-                    value={editingMed.dosage}
-                    onChange={(e) => setEditingMed({ ...editingMed, dosage: e.target.value })}
+                    value={editingMed.name}
+                    onChange={(e) => setEditingMed({ ...editingMed, name: e.target.value })}
                     className="w-full px-6 py-4 sm:px-10 sm:py-6 bg-slate-50 border-4 border-slate-100 rounded-2xl sm:rounded-[36px] font-black text-2xl sm:text-3xl focus:border-blue-500 focus:bg-white transition-all outline-none shadow-sm"
-                    placeholder="1 顆"
+                    placeholder="例如：降血壓藥"
                   />
                 </div>
-              </div>
-            </div>
 
-            <div className="flex flex-col gap-4 sm:gap-8 pb-6 sm:pb-10">
-              <button
-                onClick={saveMed}
-                className="w-full py-6 sm:py-10 bg-blue-600 text-white rounded-2xl sm:rounded-[40px] font-black text-2xl sm:text-4xl shadow-2xl active:scale-95 transition-all"
-              >
-                儲存並返回
-              </button>
-              <div className="flex gap-4 sm:gap-8">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-10">
+                  <div className="space-y-3 sm:space-y-5">
+                    <label className="block text-xl sm:text-2xl font-black text-slate-400">提醒時間</label>
+                    <input
+                      type="time"
+                      value={editingMed.reminder_time}
+                      onChange={(e) => setEditingMed({ ...editingMed, reminder_time: e.target.value })}
+                      className="w-full px-6 py-4 sm:px-10 sm:py-6 bg-slate-50 border-4 border-slate-100 rounded-2xl sm:rounded-[36px] font-black text-2xl sm:text-3xl focus:border-blue-500 focus:bg-white transition-all outline-none shadow-sm"
+                    />
+                  </div>
+                  <div className="space-y-3 sm:space-y-5">
+                    <label className="block text-xl sm:text-2xl font-black text-slate-400">每次劑量</label>
+                    <input
+                      type="text"
+                      value={editingMed.dosage}
+                      onChange={(e) => setEditingMed({ ...editingMed, dosage: e.target.value })}
+                      className="w-full px-6 py-4 sm:px-10 sm:py-6 bg-slate-50 border-4 border-slate-100 rounded-2xl sm:rounded-[36px] font-black text-2xl sm:text-3xl focus:border-blue-500 focus:bg-white transition-all outline-none shadow-sm"
+                      placeholder="1 顆"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-4 sm:gap-8 pb-6 sm:pb-10">
                 <button
-                  onClick={() => setShowEditModal(false)}
-                  className="flex-1 py-4 sm:py-8 bg-slate-100 text-slate-500 rounded-2xl sm:rounded-[40px] font-black text-xl sm:text-2xl"
+                  onClick={saveMed}
+                  className="w-full py-6 sm:py-10 bg-blue-600 text-white rounded-2xl sm:rounded-[40px] font-black text-2xl sm:text-4xl shadow-2xl active:scale-95 transition-all"
                 >
-                  取消
+                  儲存並返回
                 </button>
-                {meds.find(m => m.id === editingMed.id) && (
+                <div className="flex gap-4 sm:gap-8">
                   <button
-                    onClick={() => deleteMed(editingMed.id)}
-                    className="flex-1 py-4 sm:py-8 bg-red-50 text-red-500 rounded-2xl sm:rounded-[40px] font-black text-xl sm:text-2xl"
+                    onClick={() => setShowEditModal(false)}
+                    className="flex-1 py-4 sm:py-8 bg-slate-100 text-slate-500 rounded-2xl sm:rounded-[40px] font-black text-xl sm:text-2xl"
                   >
-                    刪除
+                    取消
                   </button>
-                )}
+                  {meds.find(m => m.id === editingMed.id) && (
+                    <button
+                      onClick={() => deleteMed(editingMed.id)}
+                      className="flex-1 py-4 sm:py-8 bg-red-50 text-red-500 rounded-2xl sm:rounded-[40px] font-black text-xl sm:text-2xl"
+                    >
+                      刪除
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
       <div className="bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 p-6 sm:p-12 rounded-[32px] sm:rounded-[60px] shadow-2xl flex items-start gap-6 sm:gap-10 text-white relative overflow-hidden active:scale-98 transition-all group">
         <div className="absolute top-0 right-0 p-4 opacity-10 text-[100px] sm:text-[180px] rotate-12 group-hover:rotate-45 transition-transform duration-1000">
@@ -422,7 +458,7 @@ const MedicationList: React.FC<MedicationListProps> = ({ onBack, elderlyId }) =>
           animation: wave 1.2s ease-in-out infinite;
         }
       `}</style>
-    </div>
+    </div >
   );
 };
 

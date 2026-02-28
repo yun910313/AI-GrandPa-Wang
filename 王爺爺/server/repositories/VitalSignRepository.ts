@@ -1,15 +1,15 @@
-import sql from 'mssql';
+ï»¿import sql from 'mssql';
 import { ConnectionFactory } from '../services/ConnectionFactory.js';
 
 export class VitalSignRepository {
     /**
-     * ?²å??€?‰ç??†æ?æ¨™ç???
+     * ?è„£??Â€?ï¥??ï‰?ç’…î©•???
      */
     async findAll(elderlyId?: string): Promise<any[]> {
         let pool;
         try {
             pool = await ConnectionFactory.createConnection();
-            let query = 'SELECT id, elderly_id, CAST(timestamp AS VARCHAR) as timestamp, heart_rate, systolic, diastolic, blood_oxygen, temperature FROM vital_signs';
+            let query = 'SELECT id, elderly_id, CAST(timestamp AS VARCHAR) as timestamp, heart_rate, systolic, diastolic, blood_oxygen, temperature, steps FROM vital_signs';
 
             const request = pool.request();
             if (elderlyId) {
@@ -29,25 +29,44 @@ export class VitalSignRepository {
     }
 
     /**
-     * ?²å??€?°ç?ä¸€ç­†ç??†æ?æ¨?
+     * ?è„£??Â€?å•?éŠÂ€è‘ï‰??ï‰?ç’…?
      */
     async findLatest(elderlyId?: string): Promise<any | null> {
         let pool;
         try {
             pool = await ConnectionFactory.createConnection();
-            let query = 'SELECT TOP 1 id, elderly_id, CAST(timestamp AS VARCHAR) as timestamp, heart_rate, systolic, diastolic, blood_oxygen, temperature FROM vital_signs';
 
-            const request = pool.request();
-            if (elderlyId) {
-                query += ' WHERE elderly_id = @elderlyId';
-                request.input('elderlyId', sql.UniqueIdentifier, elderlyId);
+            // å¦‚æœæ²’æœ‰æä¾› elderlyIdï¼Œå…ˆæŠ“å‡ºæœ€æ–°ä¸€ç­†ç´€éŒ„çš„ elderly_id
+            let targetId = elderlyId;
+            if (!targetId) {
+                const latestRecord = await pool.request().query('SELECT TOP 1 elderly_id FROM vital_signs ORDER BY timestamp DESC');
+                if (latestRecord.recordset.length > 0) {
+                    targetId = latestRecord.recordset[0].elderly_id;
+                } else {
+                    return null;
+                }
             }
 
-            query += ' ORDER BY timestamp DESC';
+            const request = pool.request();
+            request.input('elderlyId', sql.UniqueIdentifier, targetId);
+
+            const query = `
+                SELECT 
+                    (SELECT TOP 1 id FROM vital_signs WHERE elderly_id = @elderlyId ORDER BY timestamp DESC) as id,
+                    @elderlyId as elderly_id,
+                    (SELECT TOP 1 CAST(timestamp AS VARCHAR) FROM vital_signs WHERE elderly_id = @elderlyId ORDER BY timestamp DESC) as timestamp,
+                    (SELECT TOP 1 heart_rate FROM vital_signs WHERE elderly_id = @elderlyId AND heart_rate IS NOT NULL ORDER BY timestamp DESC) as heart_rate,
+                    (SELECT TOP 1 systolic FROM vital_signs WHERE elderly_id = @elderlyId AND systolic IS NOT NULL ORDER BY timestamp DESC) as systolic,
+                    (SELECT TOP 1 diastolic FROM vital_signs WHERE elderly_id = @elderlyId AND diastolic IS NOT NULL ORDER BY timestamp DESC) as diastolic,
+                    (SELECT TOP 1 blood_oxygen FROM vital_signs WHERE elderly_id = @elderlyId AND blood_oxygen IS NOT NULL ORDER BY timestamp DESC) as blood_oxygen,
+                    (SELECT TOP 1 temperature FROM vital_signs WHERE elderly_id = @elderlyId AND temperature IS NOT NULL ORDER BY timestamp DESC) as temperature,
+                    (SELECT TOP 1 steps FROM vital_signs WHERE elderly_id = @elderlyId AND steps IS NOT NULL ORDER BY timestamp DESC) as steps
+            `;
+
             const result = await request.query(query);
             return result.recordset.length > 0 ? result.recordset[0] : null;
         } catch (err) {
-            console.warn('VitalSignRepository: vital_signs table might not exist yet.');
+            console.error('VitalSignRepository.findLatest Error:', err);
             return null;
         } finally {
             if (pool) await pool.close();
@@ -55,7 +74,7 @@ export class VitalSignRepository {
     }
 
     /**
-     * ?°å??Ÿç??‡æ?
+     * ?å•£??î¸ƒ??ï‹ª?
      */
     async create(data: any): Promise<string> {
         let pool;
@@ -68,10 +87,11 @@ export class VitalSignRepository {
                 .input('diastolic', sql.Int, data.diastolic)
                 .input('blood_oxygen', sql.Int, data.blood_oxygen)
                 .input('temperature', sql.Decimal(4, 1), data.temperature)
+                .input('steps', sql.Int, data.steps || 0)
                 .query(`
-                    INSERT INTO vital_signs (elderly_id, timestamp, heart_rate, systolic, diastolic, blood_oxygen, temperature)
+                    INSERT INTO vital_signs (elderly_id, timestamp, heart_rate, systolic, diastolic, blood_oxygen, temperature, steps)
                     OUTPUT INSERTED.id
-                    VALUES (@elderly_id, SYSDATETIMEOFFSET(), @heart_rate, @systolic, @diastolic, @blood_oxygen, @temperature)
+                    VALUES (@elderly_id, SYSDATETIMEOFFSET(), @heart_rate, @systolic, @diastolic, @blood_oxygen, @temperature, @steps)
                 `);
             return result.recordset[0].id;
         } catch (err) {
@@ -83,7 +103,7 @@ export class VitalSignRepository {
     }
 
     /**
-     * ?´æ–°?Ÿç??‡æ?
+     * ?æ¹”î¡‡?î¸ƒ??ï‹ª?
      */
     async update(id: string, data: any): Promise<boolean> {
         let pool;
@@ -96,13 +116,15 @@ export class VitalSignRepository {
                 .input('diastolic', sql.Int, data.diastolic)
                 .input('blood_oxygen', sql.Int, data.blood_oxygen)
                 .input('temperature', sql.Decimal(4, 1), data.temperature)
+                .input('steps', sql.Int, data.steps)
                 .query(`
                     UPDATE vital_signs SET
                         heart_rate = @heart_rate,
                         systolic = @systolic,
                         diastolic = @diastolic,
                         blood_oxygen = @blood_oxygen,
-                        temperature = @temperature
+                        temperature = @temperature,
+                        steps = @steps
                     WHERE id = @id
                 `);
             return result.rowsAffected[0] > 0;
@@ -115,7 +137,7 @@ export class VitalSignRepository {
     }
 
     /**
-     * ?ªé™¤?Ÿç??‡æ?
+     * ?èŠ·î¨’?î¸ƒ??ï‹ª?
      */
     async delete(id: string): Promise<boolean> {
         let pool;

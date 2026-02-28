@@ -18,27 +18,18 @@ const hrData = [
 ];
 
 const HealthMonitor: React.FC<HealthMonitorProps> = ({ onBack, elderlyId }) => {
-  // 心率相關
-  const [isMeasuringHr, setIsMeasuringHr] = useState(false);
-  const [hrProgress, setHrProgress] = useState(0);
+  // 健康數據狀態
   const [hrValue, setHrValue] = useState(76);
-
-  // 血氧相關
-  const [isMeasuringSpo2, setIsMeasuringSpo2] = useState(false);
-  const [spo2Progress, setSpo2Progress] = useState(0);
   const [spo2Value, setSpo2Value] = useState(98);
-
-  // 血壓相關
-  const [isMeasuringBp, setIsMeasuringBp] = useState(false);
-  const [bpProgress, setBpProgress] = useState(0);
   const [bpValues, setBpValues] = useState({ sys: 122, dia: 84 });
-
-  // 體溫相關
-  const [isMeasuringTemp, setIsMeasuringTemp] = useState(false);
-  const [tempProgress, setTempProgress] = useState(0);
   const [tempValue, setTempValue] = useState(36.5);
 
-  const videoRef = useRef<HTMLVideoElement>(null);
+  // 輸入控制
+  const [activeInput, setActiveInput] = useState<'hr' | 'bp' | 'spo2' | 'temp' | null>(null);
+  const [tempInput, setTempInput] = useState("");
+  const [bpStep, setBpStep] = useState<'sys' | 'dia'>('sys');
+  const [isListening, setIsListening] = useState(false);
+
   const measureInterval = useRef<number | null>(null);
 
   const speak = useCallback((text: string) => {
@@ -51,142 +42,117 @@ const HealthMonitor: React.FC<HealthMonitorProps> = ({ onBack, elderlyId }) => {
     }
   }, []);
 
-  // --- 心率偵測邏輯 ---
-  const startHrMeasure = async () => {
-    setIsMeasuringHr(true);
-    setHrProgress(0);
-    speak("準備量測心率。請將食指輕按在後鏡頭上，放輕鬆，保持呼吸平穩。");
-
+  const fetchLatest = useCallback(async () => {
+    if (!elderlyId) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-      if (videoRef.current) videoRef.current.srcObject = stream;
-    } catch (err) {
-      console.warn("Camera access denied");
+      const res = await fetch(`/api/vital-signs-latest?elderly_id=${elderlyId}`);
+      const data = await res.json();
+      if (data) {
+        setHrValue(data.heart_rate || 76);
+        setBpValues({ sys: data.systolic || 122, dia: data.diastolic || 84 });
+        setSpo2Value(data.blood_oxygen || 98);
+        setTempValue(data.temperature || 36.5);
+      }
+    } catch (e) {
+      console.error("Fetch health data error", e);
     }
+  }, [elderlyId]);
 
-    measureInterval.current = window.setInterval(() => {
-      setHrProgress(prev => {
-        if (prev >= 100) {
-          stopHrMeasure(true);
-          return 100;
-        }
-        return prev + 3;
-      });
-    }, 100);
-  };
+  useEffect(() => {
+    fetchLatest();
+    const interval = setInterval(fetchLatest, 5000);
+    return () => clearInterval(interval);
+  }, [fetchLatest]);
 
-  const stopHrMeasure = (completed = false) => {
-    if (measureInterval.current) clearInterval(measureInterval.current);
-    if (videoRef.current?.srcObject) (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
-
-    if (completed) {
-      const result = Math.floor(Math.random() * (85 - 65 + 1)) + 65;
-      setHrValue(result);
-      speak(`量測完成。您現在的心跳是每分鐘${result}下，非常穩定，請繼續保持好心情。`);
-    }
-    setIsMeasuringHr(false);
-  };
-
-  // --- 血氧偵測邏輯 ---
-  const startSpo2Measure = async () => {
-    setIsMeasuringSpo2(true);
-    setSpo2Progress(0);
-    speak("準備量測血氧。請將食指輕輕按在後鏡頭上，並保持身體不動。");
-
+  const saveVitalRecord = async (data: any) => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-      if (videoRef.current) videoRef.current.srcObject = stream;
-    } catch (err) {
-      console.warn("Camera access denied");
-    }
-
-    measureInterval.current = window.setInterval(() => {
-      setSpo2Progress(prev => {
-        if (prev >= 100) {
-          stopSpo2Measure(true);
-          return 100;
-        }
-        return prev + 2;
+      await fetch('/api/vital-signs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          elderly_id: elderlyId || '00000000-0000-0000-0000-000000000000',
+          ...data
+        })
       });
-    }, 100);
-  };
-
-  const stopSpo2Measure = (completed = false) => {
-    if (measureInterval.current) clearInterval(measureInterval.current);
-    if (videoRef.current?.srcObject) (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
-
-    if (completed) {
-      const result = Math.floor(Math.random() * (100 - 96 + 1)) + 96;
-      setSpo2Value(result);
-      speak(`量測完成。您的血氧是百分之${result}，非常健康。`);
+      fetchLatest();
+    } catch (error) {
+      console.error("Save Vital Error:", error);
+      speak("儲存失敗，請檢查網路。");
     }
-    setIsMeasuringSpo2(false);
   };
 
-  // --- 血壓偵測邏輯 ---
-  const startBpMeasure = () => {
-    setIsMeasuringBp(true);
-    setBpProgress(0);
-    speak("準備量測血壓。請坐好，手平放在桌上，量測過程中請保持安靜。");
-
-    measureInterval.current = window.setInterval(() => {
-      setBpProgress(prev => {
-        if (prev >= 100) {
-          stopBpMeasure(true);
-          return 100;
-        }
-        return prev + 1;
-      });
-    }, 80);
-  };
-
-  const stopBpMeasure = (completed = false) => {
-    if (measureInterval.current) clearInterval(measureInterval.current);
-
-    if (completed) {
-      const sys = Math.floor(Math.random() * (135 - 115 + 1)) + 115;
-      const dia = Math.floor(Math.random() * (88 - 75 + 1)) + 75;
-      setBpValues({ sys, dia });
-      speak(`量測結束。您的血壓是：收縮壓${sys}，舒張壓${dia}。數值正常，請放心。`);
+  const startVoiceInput = () => {
+    const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+    if (!SpeechRecognition) {
+      speak("您的瀏覽器暫時不支援語音辨識。");
+      return;
     }
-    setIsMeasuringBp(false);
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'zh-TW';
+    recognition.onstart = () => setIsListening(true);
+    recognition.onend = () => setIsListening(false);
+    recognition.onresult = (event: any) => {
+      const text = event.results[0][0].transcript;
+      const digits = text.match(/\d+(\.\d+)?/);
+      if (digits) {
+        setTempInput(digits[0]);
+        speak(`聽到了，數值是 ${digits[0]}，對嗎？`);
+      } else {
+        speak("抱歉，我沒聽清楚數字，請再說一次。");
+      }
+    };
+    recognition.start();
   };
 
-  // --- 體溫偵測邏輯 ---
-  const startTempMeasure = async () => {
-    setIsMeasuringTemp(true);
-    setTempProgress(0);
-    speak("準備量測體溫。請將額頭靠近前鏡頭，保持靜止。");
+  const handleManualInput = (type: 'hr' | 'bp' | 'spo2' | 'temp') => {
+    setActiveInput(type);
+    setTempInput("");
+    setBpStep('sys');
+    const prompts: Record<string, string> = {
+      hr: "王爺爺，請告訴我您的心跳是多少？",
+      bp: "王爺爺，我們要紀錄血壓囉，請先輸入收縮壓。",
+      spo2: "請輸入您的血氧數字。",
+      temp: "請輸入您的體溫。"
+    };
+    speak(prompts[type]);
+  };
 
-    try {
-      // 嘗試使用前鏡頭
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-      if (videoRef.current) videoRef.current.srcObject = stream;
-    } catch (err) {
-      console.warn("Front camera access denied");
+  const confirmInput = async () => {
+    const val = parseFloat(tempInput);
+    if (isNaN(val)) {
+      speak("請輸入正確的數字喔。");
+      return;
     }
 
-    measureInterval.current = window.setInterval(() => {
-      setTempProgress(prev => {
-        if (prev >= 100) {
-          stopTempMeasure(true);
-          return 100;
-        }
-        return prev + 4;
-      });
-    }, 100);
-  };
-
-  const stopTempMeasure = (completed = false) => {
-    if (measureInterval.current) clearInterval(measureInterval.current);
-    if (videoRef.current?.srcObject) (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
-
-    if (completed) {
-      const result = (36.2 + Math.random() * (37.1 - 36.2)).toFixed(1);
-      setTempValue(parseFloat(result));
-      speak(`量測完成。您的體溫是${result}度，非常標準。`);
+    if (activeInput === 'hr') {
+      setHrValue(val);
+      await saveVitalRecord({ heart_rate: val });
+      speak(`記好了，心跳${val}下。`);
+      setActiveInput(null);
+    } else if (activeInput === 'spo2') {
+      setSpo2Value(val);
+      await saveVitalRecord({ blood_oxygen: val });
+      speak(`血氧百分之${val}，紀錄完成。`);
+      setActiveInput(null);
+    } else if (activeInput === 'temp') {
+      setTempValue(val);
+      await saveVitalRecord({ temperature: val });
+      speak(`體溫${val}度，已經幫您記下來了。`);
+      setActiveInput(null);
+    } else if (activeInput === 'bp') {
+      if (bpStep === 'sys') {
+        setBpValues(prev => ({ ...prev, sys: val }));
+        setBpStep('dia');
+        setTempInput("");
+        speak("好的，那舒張壓是多少呢？");
+      } else {
+        const finalBp = { sys: bpValues.sys, dia: val };
+        setBpValues(finalBp);
+        await saveVitalRecord({ systolic: finalBp.sys, diastolic: finalBp.dia });
+        speak(`血壓收縮壓${finalBp.sys}，舒張壓${val}，記好囉。`);
+        setActiveInput(null);
+      }
     }
-    setIsMeasuringTemp(false);
   };
 
   return (
@@ -204,27 +170,16 @@ const HealthMonitor: React.FC<HealthMonitorProps> = ({ onBack, elderlyId }) => {
       </div>
 
       {/* 心率圖表卡片 */}
-      <div
-        className="bg-white rounded-[48px] p-10 shadow-xl border border-slate-100 active:scale-[0.99] transition-all relative overflow-hidden"
-      >
-        <div className="flex items-center justify-between mb-8">
-          <div className="space-y-1">
-            <h3 className="text-2xl font-black text-slate-400">即時心率</h3>
-            <div className="flex items-baseline gap-4">
-              <span className="text-8xl font-black text-slate-800 tabular-nums">{hrValue}</span>
-              <span className="text-slate-400 font-black text-3xl">BPM</span>
-            </div>
+      <div className="bg-white rounded-[48px] p-10 shadow-xl border border-slate-100 transition-all">
+        <div className="mb-8">
+          <h3 className="text-2xl font-black text-slate-400">即時心率</h3>
+          <div className="flex items-baseline gap-4 mt-1">
+            <span className="text-8xl font-black text-slate-800 tabular-nums">{hrValue}</span>
+            <span className="text-slate-400 font-black text-3xl">BPM</span>
           </div>
-          <button
-            onClick={startHrMeasure}
-            className="w-24 h-24 bg-rose-50 text-rose-500 rounded-full flex flex-col items-center justify-center gap-2 border-2 border-rose-100 active:scale-90 transition-all shadow-sm"
-          >
-            <i className="fas fa-heart text-3xl animate-pulse"></i>
-            <span className="text-sm font-black">開始偵測</span>
-          </button>
         </div>
 
-        <div className="h-40 w-full opacity-60">
+        <div className="h-40 w-full opacity-60 mb-6">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={hrData}>
               <Area type="monotone" dataKey="hr" stroke="#3b82f6" strokeWidth={6} fillOpacity={0.1} fill="#3b82f6" />
@@ -233,7 +188,17 @@ const HealthMonitor: React.FC<HealthMonitorProps> = ({ onBack, elderlyId }) => {
             </AreaChart>
           </ResponsiveContainer>
         </div>
+
+        {/* 圖表下方手動輸入按鈕 */}
+        <button
+          onClick={() => handleManualInput('hr')}
+          className="w-full py-6 bg-rose-500 text-white rounded-[28px] flex items-center justify-center gap-4 border-4 border-rose-400 active:scale-95 transition-all shadow-lg"
+        >
+          <i className="fas fa-edit text-4xl"></i>
+          <span className="text-2xl font-black">手動輸入心率</span>
+        </button>
       </div>
+
 
       <div className="grid grid-cols-2 gap-6">
         {/* 血壓偵測 */}
@@ -242,10 +207,10 @@ const HealthMonitor: React.FC<HealthMonitorProps> = ({ onBack, elderlyId }) => {
           <div className="text-xl text-slate-500 font-bold">血壓</div>
           <div className="text-4xl font-black text-slate-800">{bpValues.sys}/{bpValues.dia}</div>
           <button
-            onClick={(e) => { e.stopPropagation(); startBpMeasure(); }}
-            className="mt-2 py-3 bg-indigo-50 text-indigo-600 rounded-2xl font-black text-lg active:bg-indigo-100"
+            onClick={(e) => { e.stopPropagation(); handleManualInput('bp'); }}
+            className="mt-2 py-4 bg-indigo-600 text-white rounded-2xl font-black text-xl active:scale-95 transition-all shadow-md"
           >
-            開始偵測
+            ✏️ 手動輸入
           </button>
         </div>
 
@@ -255,10 +220,10 @@ const HealthMonitor: React.FC<HealthMonitorProps> = ({ onBack, elderlyId }) => {
           <div className="text-xl text-slate-500 font-bold">血氧</div>
           <div className="text-4xl font-black text-slate-800">{spo2Value}%</div>
           <button
-            onClick={(e) => { e.stopPropagation(); startSpo2Measure(); }}
-            className="mt-2 py-3 bg-blue-50 text-blue-600 rounded-2xl font-black text-lg active:bg-blue-100"
+            onClick={(e) => { e.stopPropagation(); handleManualInput('spo2'); }}
+            className="mt-2 py-4 bg-blue-600 text-white rounded-2xl font-black text-xl active:scale-95 transition-all shadow-md"
           >
-            開始偵測
+            ✏️ 手動輸入
           </button>
         </div>
 
@@ -268,10 +233,10 @@ const HealthMonitor: React.FC<HealthMonitorProps> = ({ onBack, elderlyId }) => {
           <div className="text-xl text-slate-500 font-bold">體溫</div>
           <div className="text-4xl font-black text-slate-800">{tempValue}°C</div>
           <button
-            onClick={(e) => { e.stopPropagation(); startTempMeasure(); }}
-            className="mt-2 py-3 bg-rose-50 text-rose-600 rounded-2xl font-black text-lg active:bg-rose-100"
+            onClick={(e) => { e.stopPropagation(); handleManualInput('temp'); }}
+            className="mt-2 py-4 bg-rose-600 text-white rounded-2xl font-black text-xl active:scale-95 transition-all shadow-md"
           >
-            開始偵測
+            ✏️ 手動輸入
           </button>
         </div>
 
@@ -282,113 +247,52 @@ const HealthMonitor: React.FC<HealthMonitorProps> = ({ onBack, elderlyId }) => {
         </div>
       </div>
 
-      {/* 體溫量測彈窗 - 新增 */}
-      {isMeasuringTemp && (
-        <div className="fixed inset-0 bg-slate-900/95 z-[100] flex flex-col items-center justify-center p-8 backdrop-blur-xl">
-          <div className="w-full max-w-sm bg-white rounded-[60px] p-12 text-center shadow-2xl space-y-10 border-t-8 border-rose-400">
-            <div className="space-y-2">
-              <h3 className="text-4xl font-black text-slate-800">體溫偵測中</h3>
-              <p className="text-slate-400 text-xl font-bold">請將額頭對準前方鏡頭</p>
-            </div>
-
-            <div className="relative h-64 flex items-center justify-center">
-              {/* 溫度計視覺 */}
-              <div className="relative w-20 h-48 bg-slate-100 rounded-full overflow-hidden border-4 border-slate-200">
-                <div
-                  className="absolute bottom-0 w-full bg-rose-500 transition-all duration-300 rounded-t-full"
-                  style={{ height: `${tempProgress}%` }}
-                ></div>
-                <div className="absolute inset-0 flex flex-col justify-between py-4 text-[10px] font-black text-slate-300">
-                  <span>42°</span>
-                  <span>40°</span>
-                  <span>38°</span>
-                  <span>36°</span>
-                  <span>34°</span>
-                </div>
-              </div>
-              <div className="ml-8 flex flex-col items-start gap-1">
-                <div className="text-6xl font-black text-slate-800 tabular-nums">{(34 + (tempProgress / 100) * 3).toFixed(1)}</div>
-                <div className="text-2xl font-black text-slate-400">°C 爬升中</div>
-              </div>
-            </div>
-
-            <div className="bg-slate-50 p-8 rounded-[40px] overflow-hidden relative border-2 border-slate-100">
-              <video ref={videoRef} autoPlay playsInline className="absolute inset-0 w-full h-full object-cover opacity-30 grayscale mirror" />
-              <p className="relative z-10 text-slate-600 font-black text-2xl">
-                <i className="fas fa-face-smile mr-2 text-rose-400"></i> 偵測頭部位置
+      {/* 統一數據輸入彈窗 */}
+      {activeInput && (
+        <div className="fixed inset-0 bg-slate-900/90 z-[100] flex flex-col items-center justify-center p-6 backdrop-blur-xl">
+          <div className="w-full max-w-lg bg-white rounded-[60px] p-10 sm:p-14 text-center shadow-2xl space-y-10 border-t-8 border-blue-500 animate-in zoom-in-95 duration-300">
+            <div className="space-y-4">
+              <h3 className="text-4xl sm:text-5xl font-black text-slate-800">
+                {activeInput === 'hr' && "輸入心率"}
+                {activeInput === 'spo2' && "輸入血氧"}
+                {activeInput === 'temp' && "輸入體溫"}
+                {activeInput === 'bp' && (bpStep === 'sys' ? "輸入收縮壓" : "輸入舒張壓")}
+              </h3>
+              <p className="text-slate-400 text-xl font-bold">
+                請輸入數字，或點擊話筒用語音說出數字
               </p>
             </div>
 
-            <button
-              onClick={() => stopTempMeasure(false)}
-              className="w-full py-8 bg-slate-100 text-slate-500 rounded-[36px] font-black text-3xl"
-            >
-              取消
-            </button>
-          </div>
-        </div>
-      )}
+            <div className="relative group">
+              <input
+                type="number"
+                value={tempInput}
+                onChange={(e) => setTempInput(e.target.value)}
+                className="w-full text-center text-7xl sm:text-9xl font-black py-10 bg-slate-50 border-4 border-slate-100 rounded-[40px] focus:border-blue-500 focus:bg-white transition-all outline-none tabular-nums"
+                autoFocus
+              />
+              <button
+                onClick={startVoiceInput}
+                className={`absolute right-6 top-1/2 -translate-y-1/2 w-20 h-20 rounded-full flex items-center justify-center transition-all ${isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-blue-100 text-blue-600 hover:bg-blue-200'}`}
+              >
+                <i className={`fas ${isListening ? 'fa-microphone' : 'fa-microphone-alt'} text-3xl`}></i>
+              </button>
+            </div>
 
-      {/* 其他量測彈窗 (保持不變) */}
-      {isMeasuringHr && (
-        <div className="fixed inset-0 bg-slate-900/95 z-[100] flex flex-col items-center justify-center p-8 backdrop-blur-xl">
-          <div className="w-full max-w-sm bg-white rounded-[60px] p-12 text-center shadow-2xl space-y-10 border-t-8 border-rose-500">
-            <h3 className="text-4xl font-black text-slate-800">心率偵測中</h3>
-            <div className="relative h-64 flex items-center justify-center">
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="w-48 h-48 bg-rose-500/10 rounded-full animate-ping"></div>
-              </div>
-              <div className="relative z-10 flex flex-col items-center gap-2">
-                <i className="fas fa-heart text-8xl text-rose-500 animate-pulse"></i>
-                <div className="text-2xl font-black text-slate-400 mt-4">{hrProgress}%</div>
-              </div>
-              <svg className="absolute w-64 h-64 transform -rotate-90">
-                <circle cx="128" cy="128" r="120" stroke="currentColor" strokeWidth="12" fill="transparent" className="text-slate-100" />
-                <circle cx="128" cy="128" r="120" stroke="currentColor" strokeWidth="12" fill="transparent" className="text-rose-500 transition-all duration-100" strokeDasharray={753.98} strokeDashoffset={753.98 * (1 - hrProgress / 100)} />
-              </svg>
+            <div className="flex gap-4 sm:gap-8 pt-4">
+              <button
+                onClick={() => setActiveInput(null)}
+                className="flex-1 py-8 bg-slate-100 text-slate-500 rounded-[36px] font-black text-2xl shadow-sm"
+              >
+                取消
+              </button>
+              <button
+                onClick={confirmInput}
+                className="flex-1 py-8 bg-blue-600 text-white rounded-[36px] font-black text-2xl shadow-xl active:scale-95 transition-all"
+              >
+                {activeInput === 'bp' && bpStep === 'sys' ? "下一步" : "確定紀錄"}
+              </button>
             </div>
-            <div className="bg-slate-50 p-8 rounded-[40px] overflow-hidden relative border-2 border-slate-100">
-              <video ref={videoRef} autoPlay playsInline className="absolute inset-0 w-full h-full object-cover opacity-20 grayscale" />
-              <p className="relative z-10 text-slate-500 font-black text-2xl">手指偵測中...</p>
-            </div>
-            <button onClick={() => stopHrMeasure(false)} className="w-full py-8 bg-slate-100 text-slate-500 rounded-[36px] font-black text-3xl">取消</button>
-          </div>
-        </div>
-      )}
-
-      {isMeasuringBp && (
-        <div className="fixed inset-0 bg-slate-900/95 z-[100] flex flex-col items-center justify-center p-8 backdrop-blur-xl">
-          <div className="w-full max-w-sm bg-white rounded-[60px] p-12 text-center shadow-2xl space-y-10 border-t-8 border-indigo-500">
-            <h3 className="text-4xl font-black text-slate-800">血壓量測中</h3>
-            <div className="relative h-64 flex items-center justify-center">
-              <div className="text-8xl font-black text-indigo-600">{Math.min(180, 80 + Math.floor(bpProgress * 1.2))}</div>
-              <svg className="absolute w-64 h-64 transform -rotate-90">
-                <circle cx="128" cy="128" r="120" stroke="currentColor" strokeWidth="12" fill="transparent" className="text-indigo-500 transition-all duration-100" strokeDasharray={753.98} strokeDashoffset={753.98 * (1 - bpProgress / 100)} />
-              </svg>
-            </div>
-            <button onClick={() => stopBpMeasure(false)} className="w-full py-8 bg-slate-100 text-slate-500 rounded-[36px] font-black text-3xl">取消</button>
-          </div>
-        </div>
-      )}
-
-      {isMeasuringSpo2 && (
-        <div className="fixed inset-0 bg-slate-900/90 z-50 flex flex-col items-center justify-center p-8 backdrop-blur-md">
-          <div className="w-full max-w-sm bg-white rounded-[56px] p-10 text-center shadow-2xl">
-            <h3 className="text-3xl font-black text-slate-800 mb-6">血氧偵測中</h3>
-            <div className="relative w-48 h-48 mx-auto mb-10">
-              <svg className="w-full h-full transform -rotate-90">
-                <circle cx="96" cy="96" r="88" stroke="currentColor" strokeWidth="12" fill="transparent" className="text-slate-100" />
-                <circle cx="96" cy="96" r="88" stroke="currentColor" strokeWidth="12" fill="transparent" className="text-blue-500 transition-all duration-100" strokeDasharray={552.92} strokeDashoffset={552.92 * (1 - spo2Progress / 100)} />
-              </svg>
-              <div className="absolute inset-0 flex items-center justify-center flex-col">
-                <div className="text-5xl font-black text-slate-800">{spo2Progress}%</div>
-              </div>
-            </div>
-            <div className="bg-slate-50 rounded-3xl p-6 mb-8 border-2 border-slate-100 overflow-hidden relative">
-              <video ref={videoRef} autoPlay playsInline className="absolute inset-0 w-full h-full object-cover opacity-20 grayscale" />
-              <i className="fas fa-fingerprint text-5xl text-rose-500 animate-pulse relative z-10"></i>
-            </div>
-            <button onClick={() => stopSpo2Measure(false)} className="w-full py-6 bg-slate-100 text-slate-500 rounded-[32px] font-black text-2xl">取消</button>
           </div>
         </div>
       )}

@@ -1,10 +1,10 @@
-import sql from 'mssql';
+﻿import sql from 'mssql';
 import { ConnectionFactory } from '../services/ConnectionFactory.js';
 
 export class MedicalRecordRepository {
     /**
-     * ?��??�?�醫?��???
-     * @param elderlyId ?�選，�?濾特定長�?
+     * ?脣???????
+     * @param elderlyId ?舫嚗?瞈曄摰頛?
      */
     async findAll(elderlyId?: string): Promise<any[]> {
         let pool;
@@ -40,8 +40,8 @@ export class MedicalRecordRepository {
     }
 
     /**
-     * ?��??��?紀??
-     * @param data 資�??�件
+     * ?啣??怎?蝝??
+     * @param data 鞈??拐辣
      */
     async create(data: any): Promise<string> {
         let pool;
@@ -70,7 +70,7 @@ export class MedicalRecordRepository {
     }
 
     /**
-     * ?�新?��?紀??
+     * ?湔?怎?蝝??
      */
     async update(id: string, data: any): Promise<boolean> {
         let pool;
@@ -106,7 +106,7 @@ export class MedicalRecordRepository {
     }
 
     /**
-     * ?�除?��?紀??
+     * ?芷?怎?蝝??
      */
     async delete(id: string): Promise<boolean> {
         let pool;
