@@ -1,7 +1,6 @@
 import React, { useState, useEffect, createContext, useContext, useCallback } from 'react';
 import {
   Heart,
-  Hospital,
   Pill,
   ClipboardList,
   MapPin,
@@ -19,7 +18,6 @@ import {
   Phone,
   LogOut,
   Type,
-  Monitor,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -40,9 +38,9 @@ import { MedicalRecord, Medication, TestResult, GPSLog, DoctorNote, VitalSigns, 
 type FontSizeKey = 'small' | 'normal' | 'large' | 'xlarge';
 
 const FONT_SIZE_OPTIONS: { key: FontSizeKey; label: string; px: number; desc: string }[] = [
-  { key: 'small', label: '小', px: 14, desc: '14px' },
+  { key: 'small',  label: '小',   px: 14, desc: '14px' },
   { key: 'normal', label: '標準', px: 16, desc: '16px' },
-  { key: 'large', label: '大', px: 19, desc: '19px' },
+  { key: 'large',  label: '大',   px: 19, desc: '19px' },
   { key: 'xlarge', label: '特大', px: 22, desc: '22px' },
 ];
 
@@ -53,7 +51,7 @@ interface FontSizeContextType {
 
 const FontSizeContext = createContext<FontSizeContextType>({
   fontSize: 'normal',
-  setFontSize: () => { },
+  setFontSize: () => {},
 });
 
 const useFontSize = () => useContext(FontSizeContext);
@@ -114,20 +112,6 @@ const safeFetch = async (url: string, setter: (data: any) => void) => {
   }
 };
 
-// 反向地理編碼：座標 → 繁體中文地址（使用 Nominatim OpenStreetMap）
-const reverseGeocodeZhTW = async (lat: number, lng: number): Promise<string | null> => {
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=zh-TW`,
-      { headers: { 'User-Agent': 'AnXinLTC-App/1.0' } }
-    );
-    const data = await res.json();
-    return data?.display_name || null;
-  } catch {
-    return null;
-  }
-};
-
 // --- Components ---
 
 const Card = ({ children, className, onClick }: { children: React.ReactNode; className?: string; onClick?: () => void; key?: React.Key }) => (
@@ -178,21 +162,6 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [profiles, setProfiles] = useState<ElderlyProfile[]>([]);
   const [medicalRecords, setMedicalRecords] = useState<MedicalRecord[]>([]);
-  const [gpsChineseAddress, setGpsChineseAddress] = useState<string | null>(null);
-
-  // 跳轉至王爺爺專案的處理函式
-  const handleOpenWangApp = () => {
-    let targetUrl = localStorage.getItem('wang_app_url');
-    const defaultUrl = window.location.origin.includes('localhost:3000')
-      ? 'http://localhost:3001'
-      : '';
-
-    const input = prompt('請確認或輸入「王爺爺」專案的連線網址：', targetUrl || defaultUrl);
-    if (input) {
-      localStorage.setItem('wang_app_url', input);
-      window.open(input, '_blank');
-    }
-  };
 
   useEffect(() => {
     safeFetch('/api/elderly-profiles', (data) => {
@@ -215,29 +184,13 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
     return () => clearInterval(interval);
   }, [selectedId]);
 
-  // GPS 座標更新時，自動反向地理編碼取得繁體中文地址
-  useEffect(() => {
-    if (latestGps?.latitude && latestGps?.longitude) {
-      setGpsChineseAddress(null);
-      reverseGeocodeZhTW(latestGps.latitude, latestGps.longitude).then(addr => {
-        if (addr) setGpsChineseAddress(addr);
-      });
-    }
-  }, [latestGps?.latitude, latestGps?.longitude]);
-
   const selectedElderly = profiles.find(p => p.id === selectedId);
 
   return (
     <div className="space-y-6 pb-24">
       <header className="flex justify-between items-center">
         <div className="flex items-center gap-3">
-          <button
-            onClick={handleOpenWangApp}
-            className="transition-transform active:scale-95 hover:opacity-80"
-            title="點擊開啟王爺爺專案"
-          >
-            <img src="/logo.webp" alt="Logo" className="w-12 h-12 object-contain" />
-          </button>
+          <img src="/logo.webp" alt="Logo" className="w-12 h-12 object-contain" />
           <div>
             <h1 className="text-2xl font-bold text-slate-900">早安，{userProfile?.name || '...'}</h1>
             <p className="text-slate-500 text-sm">今日狀況穩定</p>
@@ -272,7 +225,7 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
           </div>
           <div>
             <h2 className="text-lg font-bold text-slate-900">{selectedElderly.name} 的管理區</h2>
-            <p className="text-xs text-slate-500">{selectedElderly.age} 歲 | 症狀：{selectedElderly.medical_history ? selectedElderly.medical_history.slice(0, 30) + (selectedElderly.medical_history.length > 30 ? '...' : '') : '尚無病史記錄'}</p>
+            <p className="text-xs text-slate-500">{selectedElderly.age} 歲 | {selectedId ? `ID: ${selectedId}` : ''}</p>
           </div>
           <div className="ml-auto">
             <Badge variant="success">守護中</Badge>
@@ -289,23 +242,17 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
           <div className="flex-1">
             <div className="flex justify-between items-center mb-1">
               <span className="text-xs font-semibold text-indigo-600 uppercase tracking-wider">即時定位</span>
-              {selectedElderly?.safe_zone_lat && selectedElderly?.safe_zone_lng ? (
-                latestGps ? (
-                  (() => {
-                    const dist = calculateDistance(latestGps.latitude, latestGps.longitude, selectedElderly.safe_zone_lat, selectedElderly.safe_zone_lng);
-                    const range = selectedElderly.safe_zone_range || 500;
-                    const isSafe = dist <= range;
-                    const exceeded = Math.round(dist - range);
-                    return <Badge variant={isSafe ? 'success' : 'danger'}>{isSafe ? '安全範圍內' : `超出範圍 (${exceeded}m)`}</Badge>;
-                  })()
-                ) : (
-                  <Badge variant="success">圍籬保護中</Badge>
-                )
+              {selectedElderly && latestGps && selectedElderly.safe_zone_lat && selectedElderly.safe_zone_lng ? (
+                (() => {
+                  const dist = calculateDistance(latestGps.latitude, latestGps.longitude, selectedElderly.safe_zone_lat, selectedElderly.safe_zone_lng);
+                  const isSafe = dist <= (selectedElderly.safe_zone_range || 500);
+                  return <Badge variant={isSafe ? 'success' : 'danger'}>{isSafe ? '安全區域內' : `超出範圍 (${Math.round(dist)}m)`}</Badge>;
+                })()
               ) : (
-                <Badge variant="warning">尚未設定圍籬</Badge>
+                <Badge variant="warning">偵測中</Badge>
               )}
             </div>
-            <p className="text-slate-900 font-medium mb-1">{gpsChineseAddress || (latestGps ? '地址查詢中...' : '讀取中...')}</p>
+            <p className="text-slate-900 font-medium mb-1">{latestGps?.address || '讀取中...'}</p>
             <p className="text-slate-500 text-xs">最後更新: {latestGps ? format(new Date(latestGps.timestamp), 'HH:mm') : '--:--'}</p>
           </div>
           <ChevronRight className="text-slate-400 self-center" size={20} />
@@ -353,8 +300,8 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
       {/* Main Grid */}
       <div className="grid grid-cols-2 gap-4">
         <Card onClick={() => onNavigate('medical')} className="flex flex-col gap-3">
-          <div className="p-2 bg-blue-50 text-blue-600 rounded-xl w-fit">
-            <Hospital size={24} />
+          <div className="p-2 bg-rose-50 text-rose-600 rounded-xl w-fit">
+            <Heart size={24} />
           </div>
           <div>
             <h3 className="font-semibold text-slate-900 text-sm">就醫紀錄</h3>
@@ -377,6 +324,7 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
             </p>
           </div>
         </Card>
+
       </div>
     </div>
   );
@@ -1011,11 +959,9 @@ const TestResultsView = ({ onBack, selectedId }: { onBack: () => void, selectedI
   );
 };
 
-
 const GPSView = ({ onBack, selectedId }: { onBack: () => void, selectedId: string | null }) => {
   const [latest, setLatest] = useState<GPSLog | null>(null);
   const [elderly, setElderly] = useState<ElderlyProfile | null>(null);
-  const [chineseAddress, setChineseAddress] = useState<string | null>(null);
 
   useEffect(() => {
     const currentId = selectedId || '';
@@ -1027,18 +973,6 @@ const GPSView = ({ onBack, selectedId }: { onBack: () => void, selectedId: strin
     }, 10000);
     return () => clearInterval(interval);
   }, [selectedId]);
-
-  // 當 GPS 座標更新時，自動反向地理編碼取得繁體中文地址
-  useEffect(() => {
-    if (latest?.latitude && latest?.longitude) {
-      setChineseAddress(null); // 重置，顯示讀取中
-      reverseGeocodeZhTW(latest.latitude, latest.longitude).then(addr => {
-        if (addr) setChineseAddress(addr);
-      });
-    }
-  }, [latest?.latitude, latest?.longitude]);
-
-  const displayAddress = chineseAddress || latest?.address || null;
 
   const lat = latest?.latitude ?? 22.6273;
   const lng = latest?.longitude ?? 120.3014;
@@ -1086,28 +1020,19 @@ const GPSView = ({ onBack, selectedId }: { onBack: () => void, selectedId: strin
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-slate-900">{elderly?.name || '讀取中...'}</p>
-                <p className="text-xs text-slate-500 truncate">{displayAddress || (latest ? '地址查詢中...' : '定位中...')}</p>
+                <p className="text-xs text-slate-500 truncate">{latest?.address || '定位中...'}</p>
               </div>
               <div className="text-right text-[0.625rem] text-slate-400 flex-shrink-0">
                 <p>{latest ? format(new Date(latest.timestamp), 'HH:mm') : '--:--'}</p>
-                {elderly?.safe_zone_lat && elderly?.safe_zone_lng ? (
-                  latest ? (
-                    (() => {
-                      const dist = calculateDistance(latest.latitude, latest.longitude, elderly.safe_zone_lat, elderly.safe_zone_lng);
-                      const range = elderly.safe_zone_range || 500;
-                      const isSafe = dist <= range;
-                      return (
-                        <p className={cn("font-bold", isSafe ? "text-emerald-600" : "text-rose-600")}>
-                          {isSafe ? "圍籬內" : `超出 ${Math.round(dist - range)}m`}
-                        </p>
-                      );
-                    })()
-                  ) : (
-                    <p className="text-indigo-500 font-bold">圍籬保護中</p>
-                  )
-                ) : (
-                  <p className="text-slate-400">尚未設定圍籬</p>
-                )}
+                {latest && elderly?.safe_zone_lat && elderly?.safe_zone_lng ? (
+                  (() => {
+                    const dist = calculateDistance(latest.latitude, latest.longitude, elderly.safe_zone_lat, elderly.safe_zone_lng);
+                    const isSafe = dist <= (elderly.safe_zone_range || 500);
+                    return <p className={cn("font-bold", isSafe ? "text-emerald-600" : "text-rose-600")}>
+                      {isSafe ? "安全區域" : `危險！超出 ${Math.round(dist)}m`}
+                    </p>;
+                  })()
+                ) : <p className="text-slate-400">尚未設定圍籬</p>}
               </div>
             </div>
           </Card>
@@ -1119,7 +1044,7 @@ const GPSView = ({ onBack, selectedId }: { onBack: () => void, selectedId: strin
         <Card className="space-y-2">
           <div className="flex justify-between items-center text-sm">
             <span className="text-slate-500">目前地址</span>
-            <span className="font-medium text-slate-900 text-right max-w-[60%]">{displayAddress || (latest ? '地址查詢中...' : '讀取中...')}</span>
+            <span className="font-medium text-slate-900 text-right max-w-[60%]">{latest?.address || '讀取中...'}</span>
           </div>
           <div className="flex justify-between items-center text-sm">
             <span className="text-slate-500">緯度</span>
@@ -1136,51 +1061,19 @@ const GPSView = ({ onBack, selectedId }: { onBack: () => void, selectedId: strin
         </Card>
 
         <h3 className="font-bold text-slate-900">安全設定</h3>
-        <Card className="space-y-3">
-          <div className="flex items-start gap-3">
-            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg flex-shrink-0 mt-0.5">
+        <Card className="flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
               <MapPin size={20} />
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-slate-900">電子圍籬地址</p>
-              <p className="text-sm text-slate-600 mt-0.5 leading-relaxed">
-                {elderly?.safe_zone_address || '（尚未設定圍籬地址）'}
-              </p>
-              <div className="flex items-center gap-2 mt-2 flex-wrap">
-                <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-600 text-xs font-bold px-2 py-1 rounded-full">
-                  <MapPin size={11} />
-                  半徑 {elderly?.safe_zone_range || 500} 公尺
-                </span>
-                {elderly?.safe_zone_lat && elderly?.safe_zone_lng ? (
-                  <span className="text-xs text-slate-400 font-mono">
-                    {elderly.safe_zone_lat.toFixed(4)}, {elderly.safe_zone_lng.toFixed(4)}
-                  </span>
-                ) : (
-                  <span className="text-xs text-slate-400">座標未設定</span>
-                )}
-              </div>
+            <div>
+              <p className="text-sm font-bold">電子圍籬</p>
+              <p className="text-xs text-slate-500">住家半徑 {elderly?.safe_zone_range || 500} 公尺</p>
             </div>
           </div>
-          {elderly?.safe_zone_lat && elderly?.safe_zone_lng && latest ? (
-            (() => {
-              const dist = calculateDistance(
-                latest.latitude, latest.longitude,
-                elderly.safe_zone_lat, elderly.safe_zone_lng
-              );
-              const isSafe = dist <= (elderly.safe_zone_range || 500);
-              return (
-                <div className={cn(
-                  "flex items-center gap-2 p-2.5 rounded-xl text-sm font-bold",
-                  isSafe ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
-                )}>
-                  <MapPin size={16} />
-                  {isSafe
-                    ? `長輩在圍籬範圍內（距圍籬中心 ${Math.round(dist)}公尺）`
-                    : `⚠️ 長輩已超出圍籬（超出 ${Math.round(dist - (elderly.safe_zone_range || 500))}公尺）`}
-                </div>
-              );
-            })()
-          ) : null}
+          <div className="w-12 h-6 bg-indigo-600 rounded-full relative">
+            <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full"></div>
+          </div>
         </Card>
       </div>
     </div>
@@ -1444,7 +1337,6 @@ const EditElderlyView = ({ onBack, user }: { onBack: () => void, user: any }) =>
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [geocodeStatus, setGeocodeStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [formData, setFormData] = useState<Partial<ElderlyProfile>>({
     name: '',
     age: 0,
@@ -1460,77 +1352,6 @@ const EditElderlyView = ({ onBack, user }: { onBack: () => void, user: any }) =>
     safe_zone_lng: undefined,
     medical_history: ''
   });
-
-  const geocodeAddress = async (address: string) => {
-    if (!address.trim()) return;
-    setGeocodeStatus('loading');
-
-    // 內部查詢輔助函數
-    const queryNominatim = async (query: string): Promise<{ lat: string; lon: string } | null> => {
-      try {
-        const encoded = encodeURIComponent(query);
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?q=${encoded}&format=json&limit=1&accept-language=zh-TW&countrycodes=tw`,
-          { headers: { 'User-Agent': 'AnXinLTC-App/1.0' } }
-        );
-        const data = await res.json();
-        return data && data.length > 0 ? { lat: data[0].lat, lon: data[0].lon } : null;
-      } catch {
-        return null;
-      }
-    };
-
-    // 去掉門牌號碼（去掉結尾的數字和中文數量詞）以查詢街道層級
-    const stripStreetNumber = (addr: string) => addr.replace(/\d+[\u865f\u53f7\u5f04\u680f\u6a13\u5c64]?$/, '').trim();
-
-    try {
-      // 第一步：直接用繁體中文原始地址查詢
-      let result = await queryNominatim(address);
-      console.log('第一步（繁體中文）:', result ? '✅ 成功' : '❌ 未找到');
-
-      // 第二步：去掉門牌號，查街道+行政區
-      if (!result) {
-        const streetOnly = stripStreetNumber(address);
-        if (streetOnly && streetOnly !== address) {
-          result = await queryNominatim(streetOnly);
-          console.log('第二步（去門牌號）:', result ? '✅ 成功' : '❌ 未找到', '查詢:', streetOnly);
-        }
-      }
-
-      // 第三步：翻成英文再試
-      if (!result) {
-        console.log('嘗試翻譯為英文後查詢...');
-        try {
-          const translateRes = await fetch(
-            `https://api.mymemory.translated.net/get?q=${encodeURIComponent(address)}&langpair=zh-TW|en`
-          );
-          const translateData = await translateRes.json();
-          const englishAddress = translateData.responseData?.translatedText;
-          if (englishAddress && englishAddress !== address) {
-            console.log('英文地址:', englishAddress);
-            result = await queryNominatim(englishAddress);
-            console.log('第三步（英文翻譯）:', result ? '✅ 成功' : '❌ 未找到');
-          }
-        } catch (e) {
-          console.warn('翻譯失敗，略過英文備援查詢', e);
-        }
-      }
-
-      if (result) {
-        setFormData(prev => ({
-          ...prev,
-          safe_zone_lat: parseFloat(parseFloat(result!.lat).toFixed(7)),
-          safe_zone_lng: parseFloat(parseFloat(result!.lon).toFixed(7)),
-        }));
-        setGeocodeStatus('success');
-      } else {
-        setGeocodeStatus('error');
-      }
-    } catch (err) {
-      console.error('Geocode error:', err);
-      setGeocodeStatus('error');
-    }
-  };
 
   const fetchProfiles = async () => {
     setLoading(true);
@@ -1739,35 +1560,10 @@ const EditElderlyView = ({ onBack, user }: { onBack: () => void, user: any }) =>
             <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">電子圍籬安全地址</label>
             <input
               type="text"
-              placeholder="例：高雄市前金區中正四路213號（建議包含縣市區鄉）"
               value={formData.safe_zone_address || ''}
-              onChange={e => {
-                setFormData({ ...formData, safe_zone_address: e.target.value });
-                setGeocodeStatus('idle');
-              }}
-              onBlur={() => geocodeAddress(formData.safe_zone_address || '')}
+              onChange={e => setFormData({ ...formData, safe_zone_address: e.target.value })}
               className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
             />
-            {geocodeStatus === 'loading' && (
-              <p className="text-xs text-indigo-500 flex items-center gap-1 mt-1">
-                🔍 正在查詢座標（多層備援中，請稍候）...
-              </p>
-            )}
-            {geocodeStatus === 'success' && (
-              <p className="text-xs text-emerald-600 flex items-center gap-1 mt-1">
-                ✅ 座標已自動判定！下方可檢視變綠欄位
-              </p>
-            )}
-            {geocodeStatus === 'error' && (
-              <div className="mt-1 p-2 bg-rose-50 rounded-lg">
-                <p className="text-xs text-rose-600 font-bold">⚠️ 三種方式均查詢不到座標</p>
-                <p className="text-xs text-rose-500 mt-0.5 leading-relaxed">請試試：<br />
-                  ① 縣市區鄉寫完整（如「高雄市前金區中正四路213號」）<br />
-                  ② 使用阿拉伯數字，不用中文數字<br />
-                  ③ 或直接在下方手動填寫緯度/經度
-                </p>
-              </div>
-            )}
           </div>
           <div className="space-y-1">
             <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">電子圍籬範圍 (公尺)</label>
@@ -1778,7 +1574,28 @@ const EditElderlyView = ({ onBack, user }: { onBack: () => void, user: any }) =>
               className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
             />
           </div>
-
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">中心緯度 (Latitude)</label>
+              <input
+                type="number" step="any"
+                placeholder="例如: 22.6273"
+                value={formData.safe_zone_lat ?? ''}
+                onChange={e => setFormData({ ...formData, safe_zone_lat: e.target.value === '' ? undefined : Number(e.target.value) })}
+                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">中心經度 (Longitude)</label>
+              <input
+                type="number" step="any"
+                placeholder="例如: 120.3014"
+                value={formData.safe_zone_lng ?? ''}
+                onChange={e => setFormData({ ...formData, safe_zone_lng: e.target.value === '' ? undefined : Number(e.target.value) })}
+                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
+              />
+            </div>
+          </div>
           <div className="space-y-1">
             <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">過往病史</label>
             <textarea
@@ -2168,48 +1985,48 @@ export default function App() {
 
   return (
     <FontSizeProvider>
-      <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
-        <div className="max-w-md mx-auto px-6 pt-8 min-h-screen relative">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={user ? currentView : 'login'}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.2 }}
-            >
-              {renderView()}
-            </motion.div>
-          </AnimatePresence>
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
+      <div className="max-w-md mx-auto px-6 pt-8 min-h-screen relative">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={user ? currentView : 'login'}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+          >
+            {renderView()}
+          </motion.div>
+        </AnimatePresence>
 
-          {/* Bottom Navigation */}
-          {user && (
-            <nav className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-lg border-t border-slate-100 px-6 py-4 flex justify-around items-center z-50">
-              <button
-                onClick={() => setCurrentView('dashboard')}
-                className={cn("flex flex-col items-center gap-1", currentView === 'dashboard' ? "text-indigo-600" : "text-slate-400")}
-              >
-                <Home size={24} />
-                <span className="text-[0.625rem] font-bold uppercase tracking-widest">首頁</span>
-              </button>
-              <button
-                onClick={() => setCurrentView('gps')}
-                className={cn("flex flex-col items-center gap-1", currentView === 'gps' ? "text-indigo-600" : "text-slate-400")}
-              >
-                <MapPin size={24} />
-                <span className="text-[0.625rem] font-bold uppercase tracking-widest">定位</span>
-              </button>
-              <button
-                onClick={() => setCurrentView('profile')}
-                className={cn("flex flex-col items-center gap-1", currentView === 'profile' ? "text-indigo-600" : "text-slate-400")}
-              >
-                <User size={24} />
-                <span className="text-[0.625rem] font-bold uppercase tracking-widest">我的</span>
-              </button>
-            </nav>
-          )}
-        </div>
+        {/* Bottom Navigation */}
+        {user && (
+          <nav className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-lg border-t border-slate-100 px-6 py-4 flex justify-around items-center z-50">
+            <button
+              onClick={() => setCurrentView('dashboard')}
+              className={cn("flex flex-col items-center gap-1", currentView === 'dashboard' ? "text-indigo-600" : "text-slate-400")}
+            >
+              <Home size={24} />
+              <span className="text-[0.625rem] font-bold uppercase tracking-widest">首頁</span>
+            </button>
+            <button
+              onClick={() => setCurrentView('gps')}
+              className={cn("flex flex-col items-center gap-1", currentView === 'gps' ? "text-indigo-600" : "text-slate-400")}
+            >
+              <MapPin size={24} />
+              <span className="text-[0.625rem] font-bold uppercase tracking-widest">定位</span>
+            </button>
+            <button
+              onClick={() => setCurrentView('profile')}
+              className={cn("flex flex-col items-center gap-1", currentView === 'profile' ? "text-indigo-600" : "text-slate-400")}
+            >
+              <User size={24} />
+              <span className="text-[0.625rem] font-bold uppercase tracking-widest">我的</span>
+            </button>
+          </nav>
+        )}
       </div>
+    </div>
     </FontSizeProvider>
   );
 }

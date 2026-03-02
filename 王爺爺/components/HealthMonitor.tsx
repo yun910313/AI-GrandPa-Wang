@@ -23,6 +23,7 @@ const HealthMonitor: React.FC<HealthMonitorProps> = ({ onBack, elderlyId }) => {
   const [spo2Value, setSpo2Value] = useState(98);
   const [bpValues, setBpValues] = useState({ sys: 122, dia: 84 });
   const [tempValue, setTempValue] = useState(36.5);
+  const [stepsValue, setStepsValue] = useState(0);
 
   // 輸入控制
   const [activeInput, setActiveInput] = useState<'hr' | 'bp' | 'spo2' | 'temp' | null>(null);
@@ -52,6 +53,7 @@ const HealthMonitor: React.FC<HealthMonitorProps> = ({ onBack, elderlyId }) => {
         setBpValues({ sys: data.systolic || 122, dia: data.diastolic || 84 });
         setSpo2Value(data.blood_oxygen || 98);
         setTempValue(data.temperature || 36.5);
+        setStepsValue(data.steps || 0);
       }
     } catch (e) {
       console.error("Fetch health data error", e);
@@ -243,7 +245,7 @@ const HealthMonitor: React.FC<HealthMonitorProps> = ({ onBack, elderlyId }) => {
         <div className="bg-white p-8 rounded-[40px] shadow-sm border border-slate-100 flex flex-col gap-4">
           <div className="text-emerald-500"><i className="fas fa-person-walking text-4xl"></i></div>
           <div className="text-xl text-slate-500 font-bold">步數</div>
-          <div className="text-4xl font-black text-slate-800">3,420</div>
+          <div className="text-4xl font-black text-slate-800">{stepsValue.toLocaleString()}</div>
         </div>
       </div>
 

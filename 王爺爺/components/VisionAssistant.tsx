@@ -1,6 +1,7 @@
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { GoogleGenAI } from '@google/genai';
+// 移除前端 GoogleGenAI，改由後端處理 API Key
+// import { GoogleGenAI } from '@google/genai';
 
 type VisionMode = 'med' | 'text' | 'safety' | 'food' | 'find' | 'general';
 
@@ -20,6 +21,11 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
 
   const [zoom, setZoom] = useState<number>(1);
   const [zoomRange, setZoomRange] = useState<{ min: number; max: number; step: number } | null>(null);
+
+  // 鏡頭切換相關
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+  const [showDeviceSelector, setShowDeviceSelector] = useState(false);
 
   // 尋物目標
   const [findTarget, setFindTarget] = useState<string>('');
@@ -48,55 +54,80 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
   const captureAndAnalyze = useCallback(async () => {
     if (!videoRef.current || !canvasRef.current || isAnalyzing) return;
 
-    const apiKey = process.env.API_KEY;
-    if (!apiKey) {
-      const msg = "影像辨識功能尚未設定，請聯絡家屬協助設定 API 金鑰。";
-      setResult(msg);
-      speak(msg);
-      return;
-    }
-
     speak("正在啟動辨識，請稍微拿穩手機。");
     setIsAnalyzing(true);
     setResult("正在辨識中，請稍候...");
     setIsCollapsed(false);
 
+    let modePrompt = "";
+    switch (mode) {
+      case 'med': modePrompt = "這是一張藥物或處方照片。請辨識藥名、劑量，並說明用途。"; break;
+      case 'safety': modePrompt = "請檢查環境中是否有危險因素，例如地上的水漬、雜亂電線或尖銳物。"; break;
+      case 'food': modePrompt = "請辨識這份食物是什麼，粗估熱量與營養。"; break;
+      case 'text': modePrompt = "請朗讀照片中的所有文字內容。"; break;
+      case 'find':
+        modePrompt = `請在此場景中尋找「${findTarget || '眼鏡、鑰匙、遙控器'}」。如果看到了，請具體描述它的方位（如：在桌子的左上角、在電視櫃下方）。如果沒看到，請列出看到的所有物品。`;
+        break;
+      case 'general': modePrompt = "請用溫暖的口吻描述這個場景，讓視力不好的長者也能理解。"; break;
+    }
+
     const video = videoRef.current;
+    if (video.videoWidth === 0) {
+      console.warn("相機尚未就緒 (寬度為 0)");
+      setResult("相機啟動中，請稍候再試一次。");
+      return;
+    }
+
     const canvas = canvasRef.current;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    // 優化：限制影像解析度以提升傳輸速度
+    const MAX_DIMENSION = 1024;
+    let width = video.videoWidth;
+    let height = video.videoHeight;
+
+    if (width > height) {
+      if (width > MAX_DIMENSION) {
+        height = Math.round((height * MAX_DIMENSION) / width);
+        width = MAX_DIMENSION;
+      }
+    } else {
+      if (height > MAX_DIMENSION) {
+        width = Math.round((width * MAX_DIMENSION) / height);
+        height = MAX_DIMENSION;
+      }
+    }
+
+    canvas.width = width;
+    canvas.height = height;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.drawImage(video, 0, 0);
-    const base64Image = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+    ctx.drawImage(video, 0, 0, width, height);
+    // 降低品質至 0.5 以減少 base64 長度，提升傳輸效率
+    const base64Image = canvas.toDataURL('image/jpeg', 0.5).split(',')[1];
+    console.log(`[Vision] 前端圖片優化完成 - 解析度: ${width}x${height}, 大小: ${Math.round(base64Image.length / 1024)} KB`);
 
     try {
-      const ai = new GoogleGenAI({ apiKey });
-
-      let modePrompt = "";
-      switch (mode) {
-        case 'med': modePrompt = "這是一張藥物或處方照片。請辨識藥名、劑量，並說明用途。"; break;
-        case 'safety': modePrompt = "請檢查環境中是否有危險因素，例如地上的水漬、雜亂電線或尖銳物。"; break;
-        case 'food': modePrompt = "請辨識這份食物是什麼，粗估熱量與營養。"; break;
-        case 'text': modePrompt = "請朗讀照片中的所有文字內容。"; break;
-        case 'find':
-          modePrompt = `請在此場景中尋找「${findTarget || '眼鏡、鑰匙、遙控器'}」。如果看到了，請具體描述它的方位（如：在桌子的左上角、在電視櫃下方）。如果沒看到，請列出看到的所有物品。`;
-          break;
-        case 'general': modePrompt = "請用溫暖的口吻描述這個場景，讓視力不好的長者也能理解。"; break;
-      }
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
-        contents: {
-          parts: [
-            { inlineData: { data: base64Image, mimeType: 'image/jpeg' } },
-            { text: modePrompt + "\n請使用繁體中文，分為【大意】、【詳細說明】、【重要提醒】三個部分。語氣要像家人一樣有禮。" }
-          ]
-        }
+      console.log(`[Vision] 正在發送請求至後端... 模式: ${mode}`);
+      // 方案 B：呼叫後端中轉 API
+      const response = await fetch('/api/vision/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          base64Image,
+          modePrompt,
+          mode
+        }),
       });
 
-      const text = response.text || "抱歉，我看不太清楚，請再試一次。";
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "辨識失敗");
+      }
+
+      const data = await response.json();
+      const text = data.text || "抱歉，我看不太清楚，請再試一次。";
       setResult(text);
 
       const segments = text.split(/【|】/);
@@ -104,18 +135,70 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
       speak(summary);
     } catch (err: any) {
       console.error("辨識錯誤:", err);
-      const errMsg = err?.message?.includes('API_KEY') || err?.message?.includes('401')
-        ? "API 金鑰設定有誤，請聯絡家屬處理。"
-        : "連線異常，請過一會再試一次。";
-      setResult(errMsg);
-      speak(errMsg);
+      setResult(err.message || "連線異常，請過一會再試一次。");
+      speak(err.message || "連線異常，請過一會再試一次。");
     } finally {
       setIsAnalyzing(false);
     }
   }, [isAnalyzing, mode, speak, findTarget]);
 
+  // 取得所有設備清單
+  const refreshDevices = useCallback(async () => {
+    try {
+      const allDevices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = allDevices.filter(device => device.kind === 'videoinput');
+      setDevices(videoDevices);
+      console.log("[Vision] 偵測到之視訊設備:", videoDevices);
+    } catch (err) {
+      console.error("無法取得設備列表:", err);
+    }
+  }, []);
+
+  const startCamera = async (deviceId?: string) => {
+    try {
+      // 停止舊串流
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+
+      const constraints: MediaStreamConstraints = {
+        video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'environment' },
+        audio: false
+      };
+
+      console.log(`[Vision] 正在啟動相機 (ID: ${deviceId || '預設值'})...`);
+      const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      setStream(mediaStream);
+      if (videoRef.current) videoRef.current.srcObject = mediaStream;
+
+      if (deviceId) setSelectedDeviceId(deviceId);
+
+      // 取得縮放能力
+      const track = mediaStream.getVideoTracks()[0];
+      const capabilities = track.getCapabilities() as any;
+      if (capabilities.zoom) {
+        setZoomRange({ min: capabilities.zoom.min, max: capabilities.zoom.max, step: capabilities.zoom.step || 0.1 });
+        setZoom(capabilities.zoom.min);
+      } else {
+        setZoomRange(null);
+      }
+
+      // 啟動成功後稍等片刻再更新設備清單（確保硬體標籤已正確載入）
+      setTimeout(() => {
+        refreshDevices();
+      }, 500);
+
+      speak(deviceId ? "相機切換完成。" : "影像辨識功能已開啟，您可以按下按鈕辨識物品。");
+    } catch (err) {
+      console.error("無法開啟相機:", err);
+      speak("相機開啟失敗，請檢查權限設定。");
+    }
+  };
+
   useEffect(() => {
     startCamera();
+    // 額外保險：掛載後 1 秒強制再掃一遍設備
+    setTimeout(refreshDevices, 1000);
 
     // 初始化尋物語音辨識
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitRecognition;
@@ -138,27 +221,20 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
     };
   }, []);
 
-  const startCamera = async () => {
-    try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
-        audio: false
-      });
-      setStream(mediaStream);
-      if (videoRef.current) videoRef.current.srcObject = mediaStream;
+  // 監控硬體變更（如插拔 USB 鏡頭）
+  useEffect(() => {
+    const handleDeviceChange = () => {
+      console.log("[Vision] 偵測到硬體變更，重新掃描相機...");
+      refreshDevices();
+    };
+    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange);
+    // 初始掃描
+    refreshDevices();
 
-      const track = mediaStream.getVideoTracks()[0];
-      const capabilities = track.getCapabilities() as any;
-      if (capabilities.zoom) {
-        setZoomRange({ min: capabilities.zoom.min, max: capabilities.zoom.max, step: capabilities.zoom.step || 0.1 });
-        setZoom(capabilities.zoom.min);
-      }
-      speak("影像辨識功能已開啟，您可以按下按鈕辨識物品。");
-    } catch (err) {
-      console.error("無法開啟相機:", err);
-      speak("相機開啟失敗，請檢查權限設定。");
-    }
-  };
+    return () => {
+      navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
+    };
+  }, [refreshDevices]);
 
   const applyZoom = (value: number) => {
     if (!zoomRange) return;
@@ -205,6 +281,44 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
             <i className="fas fa-chevron-left text-xl"></i>
           </button>
         )}
+
+        {/* 鏡頭切換按鍵 (頂部顯眼處) */}
+        <div className="absolute top-6 right-6 z-50 flex flex-col items-end gap-2">
+          <button
+            onClick={() => {
+              refreshDevices();
+              setShowDeviceSelector(!showDeviceSelector);
+            }}
+            className={`px-4 py-3 rounded-xl backdrop-blur-md border border-white/30 flex items-center gap-2 transition-all shadow-xl ${showDeviceSelector ? 'bg-blue-600 text-white' : 'bg-black/60 text-white active:bg-white/20'
+              }`}
+          >
+            <i className="fas fa-sync-alt"></i>
+            <span className="font-bold">更換相機 ({devices.length})</span>
+          </button>
+
+          {showDeviceSelector && (
+            <div className="mt-2 w-64 bg-slate-900/95 backdrop-blur-xl rounded-2xl border border-white/20 overflow-hidden shadow-2xl animate-in fade-in slide-in-from-top-2 duration-200">
+              {devices.map((device, idx) => (
+                <button
+                  key={device.deviceId}
+                  onClick={() => {
+                    startCamera(device.deviceId);
+                    setShowDeviceSelector(false);
+                  }}
+                  className={`w-full px-4 py-4 text-left text-white font-bold border-b border-white/10 last:border-0 hover:bg-white/10 flex items-center justify-between ${selectedDeviceId === device.deviceId ? 'bg-blue-600' : ''
+                    }`}
+                >
+                  <div className="flex items-center gap-3 truncate max-w-[200px]">
+                    <i className={`fas ${device.label.toLowerCase().includes('usb') ? 'fa-video' : 'fa-camera'} opacity-70`}></i>
+                    <span className="truncate text-base">{device.label || `相機 ${idx + 1}`}</span>
+                  </div>
+                  {selectedDeviceId === device.deviceId && <i className="fas fa-check text-xs"></i>}
+                </button>
+              ))}
+              {devices.length === 0 && <p className="text-center py-4 text-white/40 font-bold">搜尋中...</p>}
+            </div>
+          )}
+        </div>
 
         <div className="absolute right-4 top-1/2 -translate-y-1/2 flex flex-col items-center gap-6 z-20">
           {zoomRange && (
@@ -272,7 +386,7 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
         </button>
 
         <div className="px-6 pb-8 flex flex-col gap-4 overflow-hidden h-full">
-          {/* 模式選擇 3 欄 Grid */}
+          {/* 模式選擇 3 攔 Grid */}
           <div className="grid grid-cols-3 gap-3 shrink-0">
             {modes.map((m) => (
               <button
@@ -293,6 +407,7 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
             ))}
           </div>
 
+
           {!isCollapsed && (
             <div className="flex-1 overflow-y-auto space-y-4 pr-1">
               {isAnalyzing ? (
@@ -310,6 +425,14 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
                     <p className="text-3xl text-slate-700 font-black leading-relaxed">{seg.content.trim()}</p>
                   </div>
                 ))
+              ) : result ? (
+                // 顯示非格式化的結果（如錯誤訊息或一般回覆）
+                <div
+                  onClick={() => speak(result)}
+                  className="p-8 rounded-[40px] bg-rose-50 border border-rose-100 active:bg-rose-100 transition-colors cursor-pointer"
+                >
+                  <p className="text-2xl text-rose-700 font-bold leading-relaxed text-center">{result}</p>
+                </div>
               ) : (
                 <p
                   onClick={() => speak(mode === 'find' ? "請對準可能遺失物品的區域，然後按下方的立即辨識按鈕。" : "請對準物品並按下方的辨識按鈕。")}

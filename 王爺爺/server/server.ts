@@ -4,6 +4,7 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
+import { GoogleGenAI } from "@google/genai";
 
 // Load environment variables
 dotenv.config();
@@ -36,7 +37,8 @@ async function startServer() {
   const PORT = 3001;
 
   app.use(cors());
-  app.use(express.json());
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   // Authentication Routes
   app.post("/api/login", async (req, res) => {
@@ -98,10 +100,10 @@ async function startServer() {
           const hour = now.getHours();
           const minute = now.getMinutes();
           // 基準：早上 6 點開始走，到晚上 8 點約走 6000 步
-          const minutesSince6am = Math.max(0, (hour - 6) * 60 + minute);
-          const baseSteps = Math.floor(minutesSince6am * 4.5); // 每分鐘約 4.5 步
-          const jitter = Math.floor(Math.random() * 50); // 加上小幅隨機波動
-          latest.steps = Math.min(baseSteps + jitter, 9999);
+          // 模擬步數：基準由早上 6 點開始，每小時固定增加 300 步
+          // 移除隨機波動 (jitter)，確保首頁與健康頁面獲取的數值完全一致
+          const hoursSince6am = Math.max(0, hour - 6);
+          latest.steps = Math.min(hoursSince6am * 300, 9999);
         }
       }
       res.json(latest);
@@ -407,6 +409,101 @@ async function startServer() {
     }
   });
 
+  // Vision Assistant API (Gemini Proxy)
+  app.post("/api/vision/analyze", async (req, res) => {
+    try {
+      const { base64Image, modePrompt } = req.body;
+      console.log(`[Vision] 收到辨識請求，影像大小: ${Math.round(base64Image?.length / 1024)} KB`);
+
+      const apiKey = process.env.GEMINI_API_KEY;
+
+      if (!apiKey) {
+        console.error("[Vision] 錯誤: 未設定 GEMINI_API_KEY");
+        return res.status(500).json({ error: "伺服器未設定 GEMINI_API_KEY，請檢查 .env 內容" });
+      }
+
+      const genAI = new GoogleGenAI({ apiKey });
+      const prompt = modePrompt + "\n請以繁體中文回答，內容要精簡，僅列出關鍵重點，不要超過 150 字。分為【重點摘要】與【溫馨提醒】兩個部分。語氣要溫和。";
+
+      const analyzeWithModel = async (modelName: string) => {
+        console.log(`[Vision] 正在嘗試模型: ${modelName}...`);
+        try {
+          return await genAI.models.generateContent({
+            model: modelName,
+            contents: [{
+              role: "user",
+              parts: [
+                { inlineData: { data: base64Image, mimeType: "image/jpeg" } },
+                { text: prompt }
+              ]
+            }]
+          });
+        } catch (err: any) {
+          console.warn(`[Vision] 模型 ${modelName} 失敗: ${err.message}`);
+          throw err;
+        }
+      };
+
+      const modelsToTry = [
+        "gemini-2.0-flash",
+        "gemini-2.5-flash",
+        "gemini-2.0-flash-lite",
+        "gemini-flash-latest",
+        "gemini-pro-latest"
+      ];
+      let result;
+      let lastError;
+
+      for (const modelName of modelsToTry) {
+        try {
+          result = await analyzeWithModel(modelName);
+          if (result && result.text) break;
+        } catch (err: any) {
+          lastError = err;
+          // 若遇找不到 404 或配額 429，繼續嘗試下一個
+          if (err.message?.includes("404") || err.message?.includes("429") || err.message?.includes("quota") || err.message?.includes("RESOURCE_EXHAUSTED")) {
+            continue;
+          }
+          throw err;
+        }
+      }
+
+      if (!result || !result.text) {
+        // 診斷功能：列出金鑰可存取的所有模型到終端機
+        try {
+          console.log("[Vision] 正在取得可用模型列表以進行診斷...");
+          const modelsResult = await (genAI as any).models.list();
+          const names = modelsResult.map((m: any) => m.name || m.modelId);
+          console.log("[Vision] 您的金鑰目前可用的模型有:", names.join(", "));
+        } catch (e: any) {
+          console.warn("[Vision] 無法取得模型列表:", e.message);
+        }
+        throw lastError || new Error("目前所有 AI 模型皆無法存取，請稍候再試。");
+      }
+
+      console.log("[Vision] 辨識完成");
+      res.json({ text: result.text });
+    } catch (error: any) {
+      console.error("[Vision] 發生診斷錯誤:", error);
+      let userFriendlyMsg = error.message || "影像辨識執行失敗";
+
+      if (error.message?.includes("limit: 0")) {
+        userFriendlyMsg = "您的帳戶配額限制目前為 0。請檢查 Google AI Studio 是否已設定正確的付款方式或帳戶驗證（通常新帳號需等待一段時間生效）。";
+      } else if (error.message?.includes("429") || error.message?.includes("quota")) {
+        userFriendlyMsg = "辨識配額已達上限，請等待約 30 秒後再點擊一次。";
+      } else if (error.message?.includes("404")) {
+        userFriendlyMsg = "找不到指定的 AI 模型。這可能是因為 SDK 版本或地區限制。";
+      } else if (error.message?.includes("API_KEY_INVALID")) {
+        userFriendlyMsg = "API 金鑰無效，請檢查 .env 設定。";
+      }
+
+      res.status(500).json({
+        error: userFriendlyMsg,
+        details: error.message
+      });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vitePath = path.resolve(__dirname, "..");
@@ -426,7 +523,8 @@ async function startServer() {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`================================================`);
     console.log(`🚀 伺服器啟動成功！「環境已合併」`);
-    console.log(`🌐 前端網址與 API 皆在: http://localhost:${PORT}`);
+    console.log(`🏠 Local:   http://localhost:${PORT}`);
+    console.log(`🌐 Network: http://192.168.1.107:${PORT} (手機請開此網址)`);
     console.log(`📁 專案目錄: 王爺爺`);
     console.log(`================================================`);
   });
