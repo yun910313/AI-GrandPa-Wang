@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, createContext, useContext, useCallback } from 'react';
 import {
   Heart,
   Pill,
@@ -17,6 +17,7 @@ import {
   Trash2,
   Phone,
   LogOut,
+  Type,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -32,7 +33,71 @@ import { format } from 'date-fns';
 import { cn } from './lib/utils';
 import { MedicalRecord, Medication, TestResult, GPSLog, DoctorNote, VitalSigns, UserProfile, ElderlyProfile, EmergencyContact } from './types';
 
-// --- Utilities ---
+// --- Font Size Context ---
+
+type FontSizeKey = 'small' | 'normal' | 'large' | 'xlarge';
+
+const FONT_SIZE_OPTIONS: { key: FontSizeKey; label: string; px: number; desc: string }[] = [
+  { key: 'small',  label: '小',   px: 14, desc: '14px' },
+  { key: 'normal', label: '標準', px: 16, desc: '16px' },
+  { key: 'large',  label: '大',   px: 19, desc: '19px' },
+  { key: 'xlarge', label: '特大', px: 22, desc: '22px' },
+];
+
+interface FontSizeContextType {
+  fontSize: FontSizeKey;
+  setFontSize: (key: FontSizeKey) => void;
+}
+
+const FontSizeContext = createContext<FontSizeContextType>({
+  fontSize: 'normal',
+  setFontSize: () => {},
+});
+
+const useFontSize = () => useContext(FontSizeContext);
+
+const FontSizeProvider = ({ children }: { children: React.ReactNode }) => {
+  const [fontSize, setFontSizeState] = useState<FontSizeKey>(() => {
+    return (localStorage.getItem('fontSize') as FontSizeKey) || 'normal';
+  });
+
+  const applyFontSize = useCallback((key: FontSizeKey) => {
+    const opt = FONT_SIZE_OPTIONS.find(o => o.key === key) || FONT_SIZE_OPTIONS[1];
+    document.documentElement.style.fontSize = `${opt.px}px`;
+  }, []);
+
+  useEffect(() => {
+    applyFontSize(fontSize);
+  }, [fontSize, applyFontSize]);
+
+  const setFontSize = useCallback((key: FontSizeKey) => {
+    setFontSizeState(key);
+    localStorage.setItem('fontSize', key);
+    applyFontSize(key);
+  }, [applyFontSize]);
+
+  return (
+    <FontSizeContext.Provider value={{ fontSize, setFontSize }}>
+      {children}
+    </FontSizeContext.Provider>
+  );
+};
+
+
+const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+  const R = 6371e3; // meters
+  const φ1 = lat1 * Math.PI / 180;
+  const φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180;
+  const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) *
+    Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c; // in meters
+};
 
 const safeFetch = async (url: string, setter: (data: any) => void) => {
   try {
@@ -66,10 +131,10 @@ const VitalCard = ({ label, value, unit, icon: Icon, colorClass }: { label: stri
     <div className={cn("p-1.5 rounded-lg w-fit mb-1", colorClass)}>
       <Icon size={16} />
     </div>
-    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{label}</span>
+    <span className="text-[0.625rem] font-bold text-slate-400 uppercase tracking-wider">{label}</span>
     <div className="flex items-baseline gap-1">
       <span className="text-lg font-bold text-slate-900">{value}</span>
-      <span className="text-[10px] text-slate-500">{unit}</span>
+      <span className="text-[0.625rem] text-slate-500">{unit}</span>
     </div>
   </div>
 );
@@ -82,7 +147,7 @@ const Badge = ({ children, variant = 'default' }: { children: React.ReactNode; v
     success: "bg-emerald-50 text-emerald-600",
   };
   return (
-    <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-medium uppercase tracking-wider", variants[variant])}>
+    <span className={cn("px-2 py-0.5 rounded-full text-[0.625rem] font-medium uppercase tracking-wider", variants[variant])}>
       {children}
     </span>
   );
@@ -96,6 +161,7 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
   const [vitals, setVitals] = useState<VitalSigns | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [profiles, setProfiles] = useState<ElderlyProfile[]>([]);
+  const [medicalRecords, setMedicalRecords] = useState<MedicalRecord[]>([]);
 
   useEffect(() => {
     safeFetch('/api/elderly-profiles', (data) => {
@@ -110,6 +176,7 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
     safeFetch(`/api/medications?elderly_id=${currentId}`, setMeds);
     safeFetch(`/api/vital-signs-latest?elderly_id=${currentId}`, setVitals);
     safeFetch(`/api/user-profile?id=${user?.id}`, setUserProfile);
+    safeFetch(`/api/medical-records?elderly_id=${currentId}`, setMedicalRecords);
 
     const interval = setInterval(() => {
       safeFetch(`/api/vital-signs-latest?elderly_id=${currentId}`, setVitals);
@@ -175,7 +242,15 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
           <div className="flex-1">
             <div className="flex justify-between items-center mb-1">
               <span className="text-xs font-semibold text-indigo-600 uppercase tracking-wider">即時定位</span>
-              <Badge variant="success">安全區域內</Badge>
+              {selectedElderly && latestGps && selectedElderly.safe_zone_lat && selectedElderly.safe_zone_lng ? (
+                (() => {
+                  const dist = calculateDistance(latestGps.latitude, latestGps.longitude, selectedElderly.safe_zone_lat, selectedElderly.safe_zone_lng);
+                  const isSafe = dist <= (selectedElderly.safe_zone_range || 500);
+                  return <Badge variant={isSafe ? 'success' : 'danger'}>{isSafe ? '安全區域內' : `超出範圍 (${Math.round(dist)}m)`}</Badge>;
+                })()
+              ) : (
+                <Badge variant="warning">偵測中</Badge>
+              )}
             </div>
             <p className="text-slate-900 font-medium mb-1">{latestGps?.address || '讀取中...'}</p>
             <p className="text-slate-500 text-xs">最後更新: {latestGps ? format(new Date(latestGps.timestamp), 'HH:mm') : '--:--'}</p>
@@ -188,7 +263,7 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
       <div className="space-y-3">
         <div className="flex justify-between items-center">
           <h2 className="text-lg font-bold text-slate-900">即時健康狀態</h2>
-          <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full uppercase tracking-widest font-bold">Live</span>
+          <span className="text-[0.625rem] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full uppercase tracking-widest font-bold">Live</span>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <VitalCard
@@ -230,7 +305,11 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
           </div>
           <div>
             <h3 className="font-semibold text-slate-900 text-sm">就醫紀錄</h3>
-            <p className="text-slate-500 text-[10px]">上次: 2/15 榮總</p>
+            <p className="text-slate-500 text-[0.625rem]">
+              {medicalRecords.length > 0
+                ? `上次: ${format(new Date(medicalRecords[0].date), 'M/d')} ${medicalRecords[0].hospital}`
+                : '尚無紀錄'}
+            </p>
           </div>
         </Card>
 
@@ -240,7 +319,9 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
           </div>
           <div>
             <h3 className="font-semibold text-slate-900 text-sm">用藥資訊</h3>
-            <p className="text-slate-500 text-[10px]">{meds.length} 種藥物服用中</p>
+            <p className="text-slate-500 text-[0.625rem]">
+              {meds.filter(m => m.is_taken === 1).length} 已吃 / {meds.filter(m => m.is_taken !== 1).length} 尚未吃
+            </p>
           </div>
         </Card>
 
@@ -505,10 +586,11 @@ const MedicalRecordsView = ({ onBack, selectedId }: { onBack: () => void, select
   );
 };
 
-const MedicationView = ({ onBack, selectedId }: { onBack: () => void, selectedId: string | null }) => {
+const MedicationView = ({ onBack, selectedId, user }: { onBack: () => void, selectedId: string | null, user: any }) => {
   const [meds, setMeds] = useState<Medication[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     dosage: '',
@@ -523,20 +605,32 @@ const MedicationView = ({ onBack, selectedId }: { onBack: () => void, selectedId
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const url = editingId ? `/api/medications/${editingId}` : '/api/medications';
-    const method = editingId ? 'PUT' : 'POST';
+    if (submitting) return;
+    setSubmitting(true);
 
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...formData, elderly_id: selectedId })
-    });
+    try {
+      const url = editingId ? `/api/medications/${editingId}` : '/api/medications';
+      const method = editingId ? 'PUT' : 'POST';
 
-    if (res.ok) {
-      setIsAdding(false);
-      setEditingId(null);
-      setFormData({ name: '', dosage: '', reminder_time: '' });
-      fetchMeds();
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...formData, elderly_id: selectedId, user_id: user?.id })
+      });
+
+      if (res.ok) {
+        setIsAdding(false);
+        setEditingId(null);
+        setFormData({ name: '', dosage: '', reminder_time: '' });
+        fetchMeds();
+      } else {
+        const text = await res.text();
+        alert(`儲存失敗: ${text}`);
+      }
+    } catch (err: any) {
+      alert(`連線錯誤: ${err.message}`);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -607,7 +701,13 @@ const MedicationView = ({ onBack, selectedId }: { onBack: () => void, selectedId
               </div>
               <div className="flex gap-3">
                 <button type="button" onClick={() => setIsAdding(false)} className="flex-1 bg-slate-100 text-slate-600 font-bold py-3 rounded-xl">取消</button>
-                <button type="submit" className="flex-[2] bg-emerald-600 text-white font-bold py-3 rounded-xl shadow-lg shadow-emerald-100">儲存</button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="flex-[2] bg-emerald-600 text-white font-bold py-3 rounded-xl shadow-lg shadow-emerald-100 disabled:opacity-50 transition-all pointer-events-auto cursor-pointer"
+                >
+                  {submitting ? '儲存中...' : '儲存'}
+                </button>
               </div>
             </form>
           </motion.div>
@@ -635,7 +735,10 @@ const MedicationView = ({ onBack, selectedId }: { onBack: () => void, selectedId
                   <Pill size={24} />
                 </div>
                 <div className="flex-1">
-                  <h3 className="font-bold text-slate-900">{med.name}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-slate-900">{med.name}</h3>
+                    {med.is_taken === 1 && <Badge variant="success">今日已服</Badge>}
+                  </div>
                   <p className="text-xs text-slate-500">{med.dosage} | {med.reminder_time}</p>
                 </div>
                 <div className="flex flex-col gap-1 items-end">
@@ -883,7 +986,7 @@ const GPSView = ({ onBack, selectedId }: { onBack: () => void, selectedId: strin
           <ArrowLeft size={20} />
         </button>
         <h1 className="text-xl font-bold text-slate-900">GPS 定位追蹤</h1>
-        <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full uppercase tracking-widest animate-pulse">
+        <span className="ml-auto text-[0.625rem] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full uppercase tracking-widest animate-pulse">
           即時
         </span>
       </div>
@@ -900,18 +1003,36 @@ const GPSView = ({ onBack, selectedId }: { onBack: () => void, selectedId: strin
 
         {/* Overlay info card */}
         <div className="absolute bottom-4 left-4 right-4">
-          <Card className="bg-white/90 backdrop-blur-md border-none shadow-xl">
+          <Card className={cn(
+            "bg-white/90 backdrop-blur-md border-none shadow-xl",
+            latest && elderly?.safe_zone_lat && elderly?.safe_zone_lng &&
+              calculateDistance(latest.latitude, latest.longitude, elderly.safe_zone_lat, elderly.safe_zone_lng) > (elderly.safe_zone_range || 500)
+              ? "border-l-4 border-l-rose-500" : ""
+          )}>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center text-white flex-shrink-0">
+              <div className={cn(
+                "w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0 transition-colors",
+                latest && elderly?.safe_zone_lat && elderly?.safe_zone_lng &&
+                  calculateDistance(latest.latitude, latest.longitude, elderly.safe_zone_lat, elderly.safe_zone_lng) > (elderly.safe_zone_range || 500)
+                  ? "bg-rose-600 animate-bounce" : "bg-indigo-600"
+              )}>
                 <User size={20} />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-bold text-slate-900">{elderly?.name || '讀取中...'}</p>
                 <p className="text-xs text-slate-500 truncate">{latest?.address || '定位中...'}</p>
               </div>
-              <div className="text-right text-[10px] text-slate-400 flex-shrink-0">
+              <div className="text-right text-[0.625rem] text-slate-400 flex-shrink-0">
                 <p>{latest ? format(new Date(latest.timestamp), 'HH:mm') : '--:--'}</p>
-                <p className="text-emerald-600 font-bold">安全區域</p>
+                {latest && elderly?.safe_zone_lat && elderly?.safe_zone_lng ? (
+                  (() => {
+                    const dist = calculateDistance(latest.latitude, latest.longitude, elderly.safe_zone_lat, elderly.safe_zone_lng);
+                    const isSafe = dist <= (elderly.safe_zone_range || 500);
+                    return <p className={cn("font-bold", isSafe ? "text-emerald-600" : "text-rose-600")}>
+                      {isSafe ? "安全區域" : `危險！超出 ${Math.round(dist)}m`}
+                    </p>;
+                  })()
+                ) : <p className="text-slate-400">尚未設定圍籬</p>}
               </div>
             </div>
           </Card>
@@ -1071,6 +1192,9 @@ const ProfileView = ({ onBack, onNavigate, user }: { onBack: () => void; onNavig
         </Card>
       </div>
 
+      {/* Font Size */}
+      <FontSizeSelector />
+
       {/* Backup Section */}
       <div className="space-y-3">
         <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-2">資料管理</h3>
@@ -1103,7 +1227,7 @@ const ProfileView = ({ onBack, onNavigate, user }: { onBack: () => void; onNavig
       </button>
 
       <div className="text-center">
-        <p className="text-[10px] text-slate-300 uppercase tracking-[0.2em]">安心長照 © 2026</p>
+        <p className="text-[0.625rem] text-slate-300 uppercase tracking-[0.2em]">安心長照 © 2026</p>
       </div>
     </div>
   );
@@ -1207,7 +1331,7 @@ const EditProfileView = ({ onBack, user }: { onBack: () => void, user: any }) =>
   );
 };
 
-const EditElderlyView = ({ onBack }: { onBack: () => void }) => {
+const EditElderlyView = ({ onBack, user }: { onBack: () => void, user: any }) => {
   const [profiles, setProfiles] = useState<ElderlyProfile[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1224,6 +1348,8 @@ const EditElderlyView = ({ onBack }: { onBack: () => void }) => {
     primary_hospital: '',
     safe_zone_address: '',
     safe_zone_range: 500,
+    safe_zone_lat: undefined,
+    safe_zone_lng: undefined,
     medical_history: ''
   });
 
@@ -1246,10 +1372,15 @@ const EditElderlyView = ({ onBack }: { onBack: () => void }) => {
       const url = editingId ? `/api/elderly-profile/${editingId}` : '/api/elderly-profile';
       const method = editingId ? 'PUT' : 'POST';
 
+      const body = {
+        ...formData,
+        associated_user_id: user?.id
+      };
+
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(body)
       });
 
       if (res.ok) {
@@ -1443,6 +1574,28 @@ const EditElderlyView = ({ onBack }: { onBack: () => void }) => {
               className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
             />
           </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">中心緯度 (Latitude)</label>
+              <input
+                type="number" step="any"
+                placeholder="例如: 22.6273"
+                value={formData.safe_zone_lat ?? ''}
+                onChange={e => setFormData({ ...formData, safe_zone_lat: e.target.value === '' ? undefined : Number(e.target.value) })}
+                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">中心經度 (Longitude)</label>
+              <input
+                type="number" step="any"
+                placeholder="例如: 120.3014"
+                value={formData.safe_zone_lng ?? ''}
+                onChange={e => setFormData({ ...formData, safe_zone_lng: e.target.value === '' ? undefined : Number(e.target.value) })}
+                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
+              />
+            </div>
+          </div>
           <div className="space-y-1">
             <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">過往病史</label>
             <textarea
@@ -1451,6 +1604,29 @@ const EditElderlyView = ({ onBack }: { onBack: () => void }) => {
               onChange={e => setFormData({ ...formData, medical_history: e.target.value })}
               className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none resize-none"
             />
+          </div>
+          <div className="space-y-4 pt-4 border-t border-slate-100">
+            <h4 className="text-sm font-bold text-slate-900">王爺爺系統登入設定</h4>
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">登入帳號</label>
+              <input
+                type="text"
+                placeholder="建議使用手機號碼或英文帳號"
+                value={formData.account || ''}
+                onChange={e => setFormData({ ...formData, account: e.target.value })}
+                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">登入密碼</label>
+              <input
+                type="password"
+                placeholder={editingId ? "若不修改請留空" : "請輸入密碼"}
+                value={formData.password || ''}
+                onChange={e => setFormData({ ...formData, password: e.target.value })}
+                className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-rose-500 outline-none"
+              />
+            </div>
           </div>
           <motion.button
             whileTap={{ scale: 0.98 }}
@@ -1500,27 +1676,40 @@ const EditElderlyView = ({ onBack }: { onBack: () => void }) => {
     </motion.div>
   );
 };
-const EditEmergencyView = ({ onBack }: { onBack: () => void }) => {
+const EditEmergencyView = ({ onBack, user, selectedId }: { onBack: () => void, user: any, selectedId: string | null }) => {
   const [contacts, setContacts] = useState<EmergencyContact[]>([]);
+  const [elderly, setElderly] = useState<ElderlyProfile | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [formData, setFormData] = useState({ name: '', relationship: '', phone: '' });
 
-  const fetchContacts = () => safeFetch('/api/emergency-contacts', setContacts);
+  const fetchContacts = () => {
+    if (!selectedId) return;
+    safeFetch(`/api/emergency-contacts?elderly_id=${selectedId}`, setContacts);
+  };
 
   useEffect(() => {
     fetchContacts();
-  }, []);
+    if (selectedId) {
+      safeFetch(`/api/elderly-profile/${selectedId}`, setElderly);
+    }
+  }, [user?.id, selectedId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const url = editingId ? `/api/emergency-contacts/${editingId}` : '/api/emergency-contacts';
     const method = editingId ? 'PUT' : 'POST';
 
+    const body = {
+      ...formData,
+      guardian_id: user?.id,
+      elderly_id: selectedId
+    };
+
     const res = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(formData)
+      body: JSON.stringify(body)
     });
 
     if (res.ok) {
@@ -1550,6 +1739,7 @@ const EditEmergencyView = ({ onBack }: { onBack: () => void }) => {
           <ArrowLeft size={20} />
         </button>
         <h1 className="text-xl font-bold text-slate-900">
+          {elderly && <span className="text-emerald-600 block text-xs font-bold uppercase tracking-widest mb-1">{elderly.name} 的管理區</span>}
           {isAdding ? (editingId ? '編輯聯絡人' : '新增聯絡人') : '緊急聯絡人'}
         </h1>
       </div>
@@ -1694,10 +1884,61 @@ const LoginView = ({ onLoginSuccess }: { onLoginSuccess: (user: any) => void }) 
           </button>
         </form>
       </Card>
-      <p className="text-center mt-8 text-slate-400 text-[10px] leading-relaxed">
+      <p className="text-center mt-8 text-slate-400 text-[0.625rem] leading-relaxed">
         預設測試帳號: testuser / 密碼: password123<br />
         管理員帳號: admin / 密碼: 123456 (需先建立)
       </p>
+    </div>
+  );
+};
+
+// --- Font Size Selector Component ---
+
+const FontSizeSelector = () => {
+  const { fontSize, setFontSize } = useFontSize();
+
+  return (
+    <div className="space-y-3">
+      <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-2">字體大小</h3>
+      <Card className="space-y-3">
+        <div className="flex items-center gap-3 pb-2 border-b border-slate-100">
+          <div className="p-2 bg-violet-50 text-violet-600 rounded-lg">
+            <Type size={20} />
+          </div>
+          <div>
+            <p className="text-sm font-bold text-slate-900">顯示字體大小</p>
+            <p className="text-xs text-slate-400">調整後全 App 同步生效</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-4 gap-2">
+          {FONT_SIZE_OPTIONS.map((opt) => {
+            const isActive = fontSize === opt.key;
+            return (
+              <button
+                key={opt.key}
+                onClick={() => setFontSize(opt.key)}
+                className={cn(
+                  "flex flex-col items-center gap-1.5 py-3 rounded-xl border-2 transition-all active:scale-95",
+                  isActive
+                    ? "border-violet-500 bg-violet-50 text-violet-700 shadow-sm shadow-violet-100"
+                    : "border-slate-100 bg-white text-slate-500 hover:border-slate-200 hover:bg-slate-50"
+                )}
+              >
+                <span
+                  className="font-bold leading-none"
+                  style={{ fontSize: `${opt.px}px` }}
+                >
+                  A
+                </span>
+                <span className="text-[0.625rem] font-semibold tracking-wide">{opt.label}</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[0.625rem] text-slate-400 text-center">
+          目前：{FONT_SIZE_OPTIONS.find(o => o.key === fontSize)?.desc || '16px'}
+        </p>
+      </Card>
     </div>
   );
 };
@@ -1726,13 +1967,13 @@ export default function App() {
 
     switch (currentView) {
       case 'medical': return <MedicalRecordsView onBack={() => setCurrentView('dashboard')} selectedId={selectedElderlyId} />;
-      case 'meds': return <MedicationView onBack={() => setCurrentView('dashboard')} selectedId={selectedElderlyId} />;
+      case 'meds': return <MedicationView onBack={() => setCurrentView('dashboard')} selectedId={selectedElderlyId} user={user} />;
       case 'tests': return <TestResultsView onBack={() => setCurrentView('dashboard')} selectedId={selectedElderlyId} />;
       case 'gps': return <GPSView onBack={() => setCurrentView('dashboard')} selectedId={selectedElderlyId} />;
       case 'profile': return <ProfileView onBack={() => setCurrentView('dashboard')} onNavigate={setCurrentView} user={user} />;
       case 'edit-profile': return <EditProfileView onBack={() => setCurrentView('profile')} user={user} />;
-      case 'edit-elderly': return <EditElderlyView onBack={() => setCurrentView('profile')} />;
-      case 'edit-emergency': return <EditEmergencyView onBack={() => setCurrentView('profile')} />;
+      case 'edit-elderly': return <EditElderlyView onBack={() => setCurrentView('profile')} user={user} />;
+      case 'edit-emergency': return <EditEmergencyView onBack={() => setCurrentView('profile')} user={user} selectedId={selectedElderlyId} />;
       default: return <Dashboard onNavigate={setCurrentView} selectedId={selectedElderlyId} onSelectId={(id) => {
         setSelectedElderlyId(id);
         localStorage.setItem('selectedElderlyId', id.toString());
@@ -1743,6 +1984,7 @@ export default function App() {
   if (!authChecked) return <div className="min-h-screen bg-slate-50 flex items-center justify-center p-8">載入中...</div>;
 
   return (
+    <FontSizeProvider>
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
       <div className="max-w-md mx-auto px-6 pt-8 min-h-screen relative">
         <AnimatePresence mode="wait">
@@ -1765,25 +2007,26 @@ export default function App() {
               className={cn("flex flex-col items-center gap-1", currentView === 'dashboard' ? "text-indigo-600" : "text-slate-400")}
             >
               <Home size={24} />
-              <span className="text-[10px] font-bold uppercase tracking-widest">首頁</span>
+              <span className="text-[0.625rem] font-bold uppercase tracking-widest">首頁</span>
             </button>
             <button
               onClick={() => setCurrentView('gps')}
               className={cn("flex flex-col items-center gap-1", currentView === 'gps' ? "text-indigo-600" : "text-slate-400")}
             >
               <MapPin size={24} />
-              <span className="text-[10px] font-bold uppercase tracking-widest">定位</span>
+              <span className="text-[0.625rem] font-bold uppercase tracking-widest">定位</span>
             </button>
             <button
               onClick={() => setCurrentView('profile')}
               className={cn("flex flex-col items-center gap-1", currentView === 'profile' ? "text-indigo-600" : "text-slate-400")}
             >
               <User size={24} />
-              <span className="text-[10px] font-bold uppercase tracking-widest">我的</span>
+              <span className="text-[0.625rem] font-bold uppercase tracking-widest">我的</span>
             </button>
           </nav>
         )}
       </div>
     </div>
+    </FontSizeProvider>
   );
 }

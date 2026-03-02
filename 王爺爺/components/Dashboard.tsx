@@ -5,9 +5,10 @@ import { UserProfile, EmergencyContact, AppTab, Medication } from '../types';
 interface DashboardProps {
   onVoiceCall: () => void;
   onNavigate: (tab: AppTab) => void;
+  elderlyId?: string;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate }) => {
+const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate, elderlyId }) => {
   const [showSOSConfirm, setShowSOSConfirm] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [isSOSActive, setIsSOSActive] = useState(false);
@@ -39,15 +40,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate }) => {
 
   const [editForm, setEditForm] = useState<UserProfile>(profile);
 
+  const [vitalSigns, setVitalSigns] = useState({ hr: 0, steps: 0 });
+
   // 獲取後端資料
   const fetchData = useCallback(async () => {
     try {
-      // 獲取長輩基本資料 (目前預設抓取第一筆)
-      const elderlyRes = await fetch('/api/elderly-profile');
+      // 獲取長輩基本資料
+      const url = elderlyId ? `/api/elderly-profile/${elderlyId}` : '/api/elderly-profile';
+      const elderlyRes = await fetch(url);
       const elderlyData = await elderlyRes.json();
 
       // 獲取緊急聯絡人
-      const contactRes = await fetch('/api/emergency-contacts');
+      const contactUrl = elderlyId ? `/api/emergency-contacts?elderly_id=${elderlyId}` : '/api/emergency-contacts';
+      const contactRes = await fetch(contactUrl);
       const contactData = await contactRes.json();
 
       if (elderlyData) {
@@ -64,47 +69,54 @@ const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate }) => {
           }))
         });
       }
+
+      // 獲取最新生理指標
+      const vitalUrl = elderlyId ? `/api/vital-signs-latest?elderly_id=${elderlyId}` : '/api/vital-signs-latest';
+      const vitalRes = await fetch(vitalUrl);
+      const vitalData = await vitalRes.json();
+      if (vitalData) {
+        setVitalSigns({
+          hr: vitalData.heart_rate || 0,
+          steps: vitalData.steps || 0
+        });
+      }
     } catch (error) {
       console.error('Fetch data error:', error);
     }
-  }, []);
+  }, [elderlyId]);
 
   useEffect(() => {
     fetchData();
+    const interval = setInterval(fetchData, 10000); // 每10秒更新一次基本資料與健康指標
+    return () => clearInterval(interval);
   }, [fetchData]);
 
   useEffect(() => {
-    const loadMeds = () => {
-      const saved = localStorage.getItem('user_meds');
-      let currentMeds: Medication[] = [];
-      if (saved) {
-        currentMeds = JSON.parse(saved);
-      } else {
-        // 預設資料
-        currentMeds = [
-          { id: 1, name: '維他命 B 群', reminder_time: '08:00', dosage: '1 顆', taken: true },
-          { id: 2, name: '降血壓藥', reminder_time: '08:30', dosage: '1 顆', taken: false },
-          { id: 3, name: '鈣片', reminder_time: '12:00', dosage: '2 顆', taken: false },
-          { id: 4, name: '魚油', reminder_time: '20:00', dosage: '1 顆', taken: false },
-        ];
-        localStorage.setItem('user_meds', JSON.stringify(currentMeds));
-      }
-      const filtered = currentMeds.filter(m => !m.taken);
-      setPendingMeds(filtered);
+    const fetchMeds = async () => {
+      try {
+        const url = elderlyId ? `/api/medications?elderly_id=${elderlyId}` : '/api/medications';
+        const res = await fetch(url);
+        const currentMeds: Medication[] = await res.json();
 
-      // 自動語音提醒：僅在第一次載入且有待服藥時執行
-      if (filtered.length > 0 && !hasSpokenReminder.current) {
-        const timer = setTimeout(() => {
-          speak(`王爺爺，記得要吃藥喔！您今天還有${filtered[0].name}等藥物還沒吃，身體要顧好喔。`);
-          hasSpokenReminder.current = true;
-        }, 1500);
-        return () => clearTimeout(timer);
+        const filtered = currentMeds.filter(m => m.is_taken !== 1);
+        setPendingMeds(filtered);
+
+        // 自動語音提醒：僅在第一次載入且有待服藥時執行
+        if (filtered.length > 0 && !hasSpokenReminder.current) {
+          const timer = setTimeout(() => {
+            speak(`王爺爺，記得要吃藥喔！您今天還有${filtered[0].name}等藥物還沒吃，身體要顧好喔。`);
+            hasSpokenReminder.current = true;
+          }, 1500);
+          return () => clearTimeout(timer);
+        }
+      } catch (error) {
+        console.error('Fetch meds error in Dashboard:', error);
       }
     };
-    loadMeds();
-    window.addEventListener('storage', loadMeds);
-    return () => window.removeEventListener('storage', loadMeds);
-  }, [speak]);
+    fetchMeds();
+    const interval = setInterval(fetchMeds, 30000); // 每30秒更新一次藥物清單
+    return () => clearInterval(interval);
+  }, [speak, elderlyId]);
 
   useEffect(() => {
     if (isCountingDown) {
@@ -188,9 +200,18 @@ const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate }) => {
         });
       }
 
-      // 更新聯絡人 (目前簡易實作：全部重新獲取)
-      // 注意：聯絡人的精細管理 (新增/刪除/更新) 在後端可能需要更細緻的 API
-      // 這裡先實作資料庫同步
+      // 更新聯絡人與排序
+      if (profile.id) {
+        await fetch('/api/emergency-contacts/sync-all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            elderly_id: profile.id,
+            contacts: editForm.emergencyContacts
+          })
+        });
+      }
+
       await fetchData();
 
       setShowEditProfile(false);
@@ -442,19 +463,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate }) => {
       {/* Status Summary */}
       <div className="grid grid-cols-2 gap-6">
         <div
-          onClick={() => { speak(`今日還有 ${pendingMeds.length} 次待服藥項目。`); onNavigate(AppTab.MEDS); }}
+          onClick={() => { speak(`今日最新心率是${vitalSigns.hr}下。`); onNavigate(AppTab.HEALTH); }}
           className="bg-white p-6 rounded-[36px] shadow-sm border border-slate-100 text-center active:bg-slate-50 cursor-pointer"
         >
-          <div className="text-orange-500 mb-3"><i className="fas fa-pills text-3xl"></i></div>
-          <div className="text-4xl font-black text-slate-800">{pendingMeds.length} 次</div>
-          <div className="text-lg text-slate-500 font-bold mt-1">待服藥</div>
+          <div className="text-rose-500 mb-3"><i className="fas fa-heart-pulse text-3xl"></i></div>
+          <div className="text-4xl font-black text-slate-800">{vitalSigns.hr || '--'}下</div>
+          <div className="text-lg text-slate-500 font-bold mt-1">最新心率</div>
         </div>
         <div
-          onClick={() => speak("今日步數三千四百二十步。")}
+          onClick={() => speak(`您今天走了 ${vitalSigns.steps} 步。`)}
           className="bg-white p-6 rounded-[36px] shadow-sm border border-slate-100 text-center active:bg-slate-50 cursor-pointer"
         >
           <div className="text-emerald-500 mb-3"><i className="fas fa-walking text-3xl"></i></div>
-          <div className="text-4xl font-black text-slate-800">3,420</div>
+          <div className="text-4xl font-black text-slate-800">{vitalSigns.steps.toLocaleString()}</div>
           <div className="text-lg text-slate-500 font-bold mt-1">今日步數</div>
         </div>
       </div>

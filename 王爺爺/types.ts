@@ -9,11 +9,12 @@ export interface MedicalRecord {
 }
 
 export interface Medication {
-  id: number;
+  id: string;
   name: string;
   dosage: string;
   reminder_time: string;
-  taken?: boolean;
+  is_taken?: number;
+  elderly_id?: string;
 }
 
 export interface TestResult {

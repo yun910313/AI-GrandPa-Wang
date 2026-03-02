@@ -1,0 +1,147 @@
+﻿import sql from 'mssql';
+import { ConnectionFactory } from '../services/ConnectionFactory.js';
+
+export class EmergencyContactRepository {
+    /**
+     * 獲取長輩的緊急聯絡人
+     */
+    async findAll(elderlyId?: string): Promise<any[]> {
+        let pool;
+        try {
+            pool = await ConnectionFactory.createConnection();
+            let query = 'SELECT id, name, relationship, phone, sort_order, elderly_id FROM contacts';
+            const request = pool.request();
+
+            if (elderlyId) {
+                request.input('elderlyId', sql.UniqueIdentifier, elderlyId);
+                query += ' WHERE elderly_id = @elderlyId';
+            }
+
+            query += ' ORDER BY sort_order ASC, created_at DESC';
+            const result = await request.query(query);
+            return result.recordset;
+        } catch (err) {
+            console.error('EmergencyContactRepository.findAll Error:', err);
+            throw err;
+        } finally {
+            if (pool) await pool.close();
+        }
+    }
+
+    /**
+     * 批次同步聯絡人與排序 (根據長輩 ID)
+     */
+    async syncAll(elderlyId: string, contacts: any[]): Promise<boolean> {
+        let pool;
+        try {
+            pool = await ConnectionFactory.createConnection();
+
+            // 獲取該長輩的 guardian_id (若有) 用於新增資料時完整關聯
+            const elderlyRes = await pool.request()
+                .input('eid', sql.UniqueIdentifier, elderlyId)
+                .query('SELECT guardian_id FROM elderly_profiles WHERE id = @eid');
+            const guardianId = elderlyRes.recordset[0]?.guardian_id;
+
+            // 刪除該位長輩的所有聯絡人
+            await pool.request()
+                .input('eid', sql.UniqueIdentifier, elderlyId)
+                .query('DELETE FROM contacts WHERE elderly_id = @eid');
+
+            for (let i = 0; i < contacts.length; i++) {
+                const c = contacts[i];
+                await pool.request()
+                    .input('name', sql.NVarChar(100), c.name)
+                    .input('relationship', sql.NVarChar(50), c.relationship)
+                    .input('phone', sql.NVarChar(20), c.phone)
+                    .input('guardian_id', sql.UniqueIdentifier, guardianId)
+                    .input('elderly_id', sql.UniqueIdentifier, elderlyId)
+                    .input('sort_order', sql.Int, i + 1)
+                    .query(`
+                        INSERT INTO contacts (name, relationship, phone, guardian_id, elderly_id, sort_order, created_at)
+                        VALUES (@name, @relationship, @phone, @guardian_id, @elderly_id, @sort_order, SYSDATETIMEOFFSET())
+                    `);
+            }
+            return true;
+        } catch (err) {
+            console.error('EmergencyContactRepository.syncAll Error:', err);
+            throw err;
+        } finally {
+            if (pool) await pool.close();
+        }
+    }
+
+    /**
+     * 新增緊急聯絡人 (保留原本 API 結構)
+     */
+    async create(data: any): Promise<string> {
+        let pool;
+        try {
+            pool = await ConnectionFactory.createConnection();
+            const result = await pool.request()
+                .input('name', sql.NVarChar(100), data.name)
+                .input('relationship', sql.NVarChar(50), data.relationship)
+                .input('phone', sql.NVarChar(20), data.phone)
+                .input('elderly_id', sql.UniqueIdentifier, data.elderly_id)
+                .query(`
+                    INSERT INTO contacts (name, relationship, phone, elderly_id, created_at)
+                    OUTPUT INSERTED.id
+                    VALUES (@name, @relationship, @phone, @elderly_id, SYSDATETIMEOFFSET())
+                `);
+            return result.recordset[0].id;
+        } catch (err) {
+            console.error('EmergencyContactRepository.create Error:', err);
+            throw err;
+        } finally {
+            if (pool) await pool.close();
+        }
+    }
+
+    /**
+     * 更新緊急聯絡人
+     */
+    async update(id: string, data: any): Promise<boolean> {
+        let pool;
+        try {
+            pool = await ConnectionFactory.createConnection();
+            const result = await pool.request()
+                .input('id', sql.UniqueIdentifier, id)
+                .input('name', sql.NVarChar(100), data.name)
+                .input('relationship', sql.NVarChar(50), data.relationship)
+                .input('phone', sql.NVarChar(20), data.phone)
+                .query(`
+                    UPDATE contacts SET
+                        name = @name,
+                        relationship = @relationship,
+                        phone = @phone
+                    WHERE id = @id
+                `);
+            return (result.rowsAffected?.[0] ?? 0) > 0;
+        } catch (err) {
+            console.error('EmergencyContactRepository.update Error:', err);
+            throw err;
+        } finally {
+            if (pool) await pool.close();
+        }
+    }
+
+    /**
+     * 刪除緊急聯絡人
+     */
+    async delete(id: string): Promise<boolean> {
+        let pool;
+        try {
+            pool = await ConnectionFactory.createConnection();
+            const result = await pool.request()
+                .input('id', sql.UniqueIdentifier, id)
+                .query('DELETE FROM contacts WHERE id = @id');
+            return (result.rowsAffected?.[0] ?? 0) > 0;
+        } catch (err) {
+            console.error('EmergencyContactRepository.delete Error:', err);
+            throw err;
+        } finally {
+            if (pool) await pool.close();
+        }
+    }
+}
+
+export default EmergencyContactRepository;
