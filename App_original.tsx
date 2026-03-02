@@ -1,4 +1,4 @@
-import React, { useState, useEffect, createContext, useContext, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Heart,
   Pill,
@@ -17,7 +17,6 @@ import {
   Trash2,
   Phone,
   LogOut,
-  Type,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -32,57 +31,6 @@ import {
 import { format } from 'date-fns';
 import { cn } from './lib/utils';
 import { MedicalRecord, Medication, TestResult, GPSLog, DoctorNote, VitalSigns, UserProfile, ElderlyProfile, EmergencyContact } from './types';
-
-// --- Font Size Context ---
-
-type FontSizeKey = 'small' | 'normal' | 'large' | 'xlarge';
-
-const FONT_SIZE_OPTIONS: { key: FontSizeKey; label: string; px: number; desc: string }[] = [
-  { key: 'small',  label: '小',   px: 14, desc: '14px' },
-  { key: 'normal', label: '標準', px: 16, desc: '16px' },
-  { key: 'large',  label: '大',   px: 19, desc: '19px' },
-  { key: 'xlarge', label: '特大', px: 22, desc: '22px' },
-];
-
-interface FontSizeContextType {
-  fontSize: FontSizeKey;
-  setFontSize: (key: FontSizeKey) => void;
-}
-
-const FontSizeContext = createContext<FontSizeContextType>({
-  fontSize: 'normal',
-  setFontSize: () => {},
-});
-
-const useFontSize = () => useContext(FontSizeContext);
-
-const FontSizeProvider = ({ children }: { children: React.ReactNode }) => {
-  const [fontSize, setFontSizeState] = useState<FontSizeKey>(() => {
-    return (localStorage.getItem('fontSize') as FontSizeKey) || 'normal';
-  });
-
-  const applyFontSize = useCallback((key: FontSizeKey) => {
-    const opt = FONT_SIZE_OPTIONS.find(o => o.key === key) || FONT_SIZE_OPTIONS[1];
-    document.documentElement.style.fontSize = `${opt.px}px`;
-  }, []);
-
-  useEffect(() => {
-    applyFontSize(fontSize);
-  }, [fontSize, applyFontSize]);
-
-  const setFontSize = useCallback((key: FontSizeKey) => {
-    setFontSizeState(key);
-    localStorage.setItem('fontSize', key);
-    applyFontSize(key);
-  }, [applyFontSize]);
-
-  return (
-    <FontSizeContext.Provider value={{ fontSize, setFontSize }}>
-      {children}
-    </FontSizeContext.Provider>
-  );
-};
-
 
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   const R = 6371e3; // meters
@@ -131,10 +79,10 @@ const VitalCard = ({ label, value, unit, icon: Icon, colorClass }: { label: stri
     <div className={cn("p-1.5 rounded-lg w-fit mb-1", colorClass)}>
       <Icon size={16} />
     </div>
-    <span className="text-[0.625rem] font-bold text-slate-400 uppercase tracking-wider">{label}</span>
+    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{label}</span>
     <div className="flex items-baseline gap-1">
       <span className="text-lg font-bold text-slate-900">{value}</span>
-      <span className="text-[0.625rem] text-slate-500">{unit}</span>
+      <span className="text-[10px] text-slate-500">{unit}</span>
     </div>
   </div>
 );
@@ -147,7 +95,7 @@ const Badge = ({ children, variant = 'default' }: { children: React.ReactNode; v
     success: "bg-emerald-50 text-emerald-600",
   };
   return (
-    <span className={cn("px-2 py-0.5 rounded-full text-[0.625rem] font-medium uppercase tracking-wider", variants[variant])}>
+    <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-medium uppercase tracking-wider", variants[variant])}>
       {children}
     </span>
   );
@@ -263,7 +211,7 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
       <div className="space-y-3">
         <div className="flex justify-between items-center">
           <h2 className="text-lg font-bold text-slate-900">即時健康狀態</h2>
-          <span className="text-[0.625rem] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full uppercase tracking-widest font-bold">Live</span>
+          <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full uppercase tracking-widest font-bold">Live</span>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <VitalCard
@@ -305,7 +253,7 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
           </div>
           <div>
             <h3 className="font-semibold text-slate-900 text-sm">就醫紀錄</h3>
-            <p className="text-slate-500 text-[0.625rem]">
+            <p className="text-slate-500 text-[10px]">
               {medicalRecords.length > 0
                 ? `上次: ${format(new Date(medicalRecords[0].date), 'M/d')} ${medicalRecords[0].hospital}`
                 : '尚無紀錄'}
@@ -319,7 +267,7 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
           </div>
           <div>
             <h3 className="font-semibold text-slate-900 text-sm">用藥資訊</h3>
-            <p className="text-slate-500 text-[0.625rem]">
+            <p className="text-slate-500 text-[10px]">
               {meds.filter(m => m.is_taken === 1).length} 已吃 / {meds.filter(m => m.is_taken !== 1).length} 尚未吃
             </p>
           </div>
@@ -986,7 +934,7 @@ const GPSView = ({ onBack, selectedId }: { onBack: () => void, selectedId: strin
           <ArrowLeft size={20} />
         </button>
         <h1 className="text-xl font-bold text-slate-900">GPS 定位追蹤</h1>
-        <span className="ml-auto text-[0.625rem] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full uppercase tracking-widest animate-pulse">
+        <span className="ml-auto text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full uppercase tracking-widest animate-pulse">
           即時
         </span>
       </div>
@@ -1022,7 +970,7 @@ const GPSView = ({ onBack, selectedId }: { onBack: () => void, selectedId: strin
                 <p className="text-sm font-bold text-slate-900">{elderly?.name || '讀取中...'}</p>
                 <p className="text-xs text-slate-500 truncate">{latest?.address || '定位中...'}</p>
               </div>
-              <div className="text-right text-[0.625rem] text-slate-400 flex-shrink-0">
+              <div className="text-right text-[10px] text-slate-400 flex-shrink-0">
                 <p>{latest ? format(new Date(latest.timestamp), 'HH:mm') : '--:--'}</p>
                 {latest && elderly?.safe_zone_lat && elderly?.safe_zone_lng ? (
                   (() => {
@@ -1192,9 +1140,6 @@ const ProfileView = ({ onBack, onNavigate, user }: { onBack: () => void; onNavig
         </Card>
       </div>
 
-      {/* Font Size */}
-      <FontSizeSelector />
-
       {/* Backup Section */}
       <div className="space-y-3">
         <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-2">資料管理</h3>
@@ -1227,7 +1172,7 @@ const ProfileView = ({ onBack, onNavigate, user }: { onBack: () => void; onNavig
       </button>
 
       <div className="text-center">
-        <p className="text-[0.625rem] text-slate-300 uppercase tracking-[0.2em]">安心長照 © 2026</p>
+        <p className="text-[10px] text-slate-300 uppercase tracking-[0.2em]">安心長照 © 2026</p>
       </div>
     </div>
   );
@@ -1884,61 +1829,10 @@ const LoginView = ({ onLoginSuccess }: { onLoginSuccess: (user: any) => void }) 
           </button>
         </form>
       </Card>
-      <p className="text-center mt-8 text-slate-400 text-[0.625rem] leading-relaxed">
+      <p className="text-center mt-8 text-slate-400 text-[10px] leading-relaxed">
         預設測試帳號: testuser / 密碼: password123<br />
         管理員帳號: admin / 密碼: 123456 (需先建立)
       </p>
-    </div>
-  );
-};
-
-// --- Font Size Selector Component ---
-
-const FontSizeSelector = () => {
-  const { fontSize, setFontSize } = useFontSize();
-
-  return (
-    <div className="space-y-3">
-      <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-2">字體大小</h3>
-      <Card className="space-y-3">
-        <div className="flex items-center gap-3 pb-2 border-b border-slate-100">
-          <div className="p-2 bg-violet-50 text-violet-600 rounded-lg">
-            <Type size={20} />
-          </div>
-          <div>
-            <p className="text-sm font-bold text-slate-900">顯示字體大小</p>
-            <p className="text-xs text-slate-400">調整後全 App 同步生效</p>
-          </div>
-        </div>
-        <div className="grid grid-cols-4 gap-2">
-          {FONT_SIZE_OPTIONS.map((opt) => {
-            const isActive = fontSize === opt.key;
-            return (
-              <button
-                key={opt.key}
-                onClick={() => setFontSize(opt.key)}
-                className={cn(
-                  "flex flex-col items-center gap-1.5 py-3 rounded-xl border-2 transition-all active:scale-95",
-                  isActive
-                    ? "border-violet-500 bg-violet-50 text-violet-700 shadow-sm shadow-violet-100"
-                    : "border-slate-100 bg-white text-slate-500 hover:border-slate-200 hover:bg-slate-50"
-                )}
-              >
-                <span
-                  className="font-bold leading-none"
-                  style={{ fontSize: `${opt.px}px` }}
-                >
-                  A
-                </span>
-                <span className="text-[0.625rem] font-semibold tracking-wide">{opt.label}</span>
-              </button>
-            );
-          })}
-        </div>
-        <p className="text-[0.625rem] text-slate-400 text-center">
-          目前：{FONT_SIZE_OPTIONS.find(o => o.key === fontSize)?.desc || '16px'}
-        </p>
-      </Card>
     </div>
   );
 };
@@ -1984,7 +1878,6 @@ export default function App() {
   if (!authChecked) return <div className="min-h-screen bg-slate-50 flex items-center justify-center p-8">載入中...</div>;
 
   return (
-    <FontSizeProvider>
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
       <div className="max-w-md mx-auto px-6 pt-8 min-h-screen relative">
         <AnimatePresence mode="wait">
@@ -2007,26 +1900,25 @@ export default function App() {
               className={cn("flex flex-col items-center gap-1", currentView === 'dashboard' ? "text-indigo-600" : "text-slate-400")}
             >
               <Home size={24} />
-              <span className="text-[0.625rem] font-bold uppercase tracking-widest">首頁</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest">首頁</span>
             </button>
             <button
               onClick={() => setCurrentView('gps')}
               className={cn("flex flex-col items-center gap-1", currentView === 'gps' ? "text-indigo-600" : "text-slate-400")}
             >
               <MapPin size={24} />
-              <span className="text-[0.625rem] font-bold uppercase tracking-widest">定位</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest">定位</span>
             </button>
             <button
               onClick={() => setCurrentView('profile')}
               className={cn("flex flex-col items-center gap-1", currentView === 'profile' ? "text-indigo-600" : "text-slate-400")}
             >
               <User size={24} />
-              <span className="text-[0.625rem] font-bold uppercase tracking-widest">我的</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest">我的</span>
             </button>
           </nav>
         )}
       </div>
     </div>
-    </FontSizeProvider>
   );
 }
