@@ -1,5 +1,5 @@
 export const DbConfig = {
-    server: process.env.DB_SERVER || '192.168.1.107',
+    server: process.env.DB_SERVER || 'LAPTOP-H8M7AQSM\SQLEXPRESS',
     database: process.env.DB_DATABASE || 'Granpa Wang',
     user: process.env.DB_USER || 'sqlserver',
     password: process.env.DB_PASSWORD || 'sqlserver',

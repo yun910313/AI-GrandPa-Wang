@@ -389,7 +389,8 @@ async function startServer() {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`================================================`);
     console.log(`🚀 伺服器啟動成功！「環境已合併」`);
-    console.log(`🌐 前端網址與 API 皆在: http://localhost:${PORT}`);
+    console.log(`🏠 Local:   http://localhost:${PORT}`);
+    console.log(`🌐 Network: http://192.168.1.107:${PORT} (手機請開此網址)`);
     console.log(`📁 專案目錄: 安心長照---家屬守護助手`);
     console.log(`================================================`);
   });
