@@ -4,6 +4,19 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
+import os from "os";
+
+function getNetworkAddress() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name] || []) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return 'localhost';
+}
 
 // Load environment variables
 dotenv.config();
@@ -386,11 +399,12 @@ async function startServer() {
     });
   }
 
+  const networkAddress = getNetworkAddress();
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`================================================`);
     console.log(`🚀 伺服器啟動成功！「環境已合併」`);
     console.log(`🏠 Local:   http://localhost:${PORT}`);
-    console.log(`🌐 Network: http://192.168.1.107:${PORT} (手機請開此網址)`);
+    console.log(`🌐 Network: http://${networkAddress}:${PORT} (手機請開此網址)`);
     console.log(`📁 專案目錄: 安心長照---家屬守護助手`);
     console.log(`================================================`);
   });
