@@ -32,16 +32,57 @@ const HealthMonitor: React.FC<HealthMonitorProps> = ({ onBack, elderlyId }) => {
   const [isListening, setIsListening] = useState(false);
 
   const measureInterval = useRef<number | null>(null);
+  const lastAlertTime = useRef<number>(0);
+  const alertCooldown = 15000; // 15秒冷卻時間，避免重複轟炸
 
   const speak = useCallback((text: string) => {
     if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'zh-TW';
       utterance.rate = 1.0;
       window.speechSynthesis.speak(utterance);
     }
   }, []);
+
+  // 異常偵測與語音提醒
+  const checkAbnormalities = useCallback((data: any, isManual: boolean = false) => {
+    const now = Date.now();
+    if (!isManual && now - lastAlertTime.current < alertCooldown) return false;
+
+    let alertMsg = "";
+
+    if (data.heart_rate) {
+      if (data.heart_rate > 105) alertMsg = `王爺爺，心跳${data.heart_rate}下稍微快了點，請先坐下來休息休息。`;
+      else if (data.heart_rate < 50) alertMsg = `王爺爺，您的心跳${data.heart_rate}下比較慢，如果有感覺頭暈要小心。`;
+    }
+
+    if (!alertMsg && data.blood_oxygen && data.blood_oxygen < 94) {
+      alertMsg = `王爺爺，血氧百分之${data.blood_oxygen}偏低了，請慢慢做幾次深呼吸。`;
+    }
+
+    if (!alertMsg && data.temperature) {
+      if (data.temperature > 37.5) alertMsg = `王爺爺，體溫${data.temperature}度有點發燒，記得多喝溫開水。`;
+      else if (data.temperature < 35.0) alertMsg = `王爺爺，體溫降到${data.temperature}度了，記得加件衣服保暖。`;
+    }
+
+    if (!alertMsg && (data.systolic || data.diastolic)) {
+      const sys = data.systolic || 0;
+      const dia = data.diastolic || 0;
+      // 正常範圍：90 < sys < 120 且 60 < dia < 100
+      if (sys >= 120 || dia >= 100) {
+        alertMsg = `王爺爺，血壓現在是${sys}、${dia}，稍微偏高了，我們要特別注意。`;
+      } else if (sys <= 90 || (data.diastolic && dia <= 60)) {
+        alertMsg = `王爺爺，血壓現在是${sys}、${dia}，稍微偏低了，如果覺得頭暈，請先坐下休息。`;
+      }
+    }
+
+    if (alertMsg) {
+      speak(alertMsg);
+      lastAlertTime.current = now;
+      return true;
+    }
+    return false;
+  }, [speak]);
 
   const fetchLatest = useCallback(async () => {
     if (!elderlyId) return;
@@ -54,6 +95,9 @@ const HealthMonitor: React.FC<HealthMonitorProps> = ({ onBack, elderlyId }) => {
         setSpo2Value(data.blood_oxygen || 98);
         setTempValue(data.temperature || 36.5);
         setStepsValue(data.steps || 0);
+
+        // 偵測異常
+        checkAbnormalities(data);
       }
     } catch (e) {
       console.error("Fetch health data error", e);
@@ -129,17 +173,23 @@ const HealthMonitor: React.FC<HealthMonitorProps> = ({ onBack, elderlyId }) => {
     if (activeInput === 'hr') {
       setHrValue(val);
       await saveVitalRecord({ heart_rate: val });
-      speak(`記好了，心跳${val}下。`);
+      if (!checkAbnormalities({ heart_rate: val }, true)) {
+        speak(`記好了，心跳${val}下，很正常。`);
+      }
       setActiveInput(null);
     } else if (activeInput === 'spo2') {
       setSpo2Value(val);
       await saveVitalRecord({ blood_oxygen: val });
-      speak(`血氧百分之${val}，紀錄完成。`);
+      if (!checkAbnormalities({ blood_oxygen: val }, true)) {
+        speak(`血氧百分之${val}，紀錄完成。`);
+      }
       setActiveInput(null);
     } else if (activeInput === 'temp') {
       setTempValue(val);
       await saveVitalRecord({ temperature: val });
-      speak(`體溫${val}度，已經幫您記下來了。`);
+      if (!checkAbnormalities({ temperature: val }, true)) {
+        speak(`體溫${val}度，已經幫您記下來了。`);
+      }
       setActiveInput(null);
     } else if (activeInput === 'bp') {
       if (bpStep === 'sys') {
@@ -151,7 +201,9 @@ const HealthMonitor: React.FC<HealthMonitorProps> = ({ onBack, elderlyId }) => {
         const finalBp = { sys: bpValues.sys, dia: val };
         setBpValues(finalBp);
         await saveVitalRecord({ systolic: finalBp.sys, diastolic: finalBp.dia });
-        speak(`血壓收縮壓${finalBp.sys}，舒張壓${val}，記好囉。`);
+        if (!checkAbnormalities({ systolic: finalBp.sys, diastolic: finalBp.dia }, true)) {
+          speak(`收縮壓${finalBp.sys}，舒張壓${val}，都在正常範圍，記好囉。`);
+        }
         setActiveInput(null);
       }
     }

@@ -331,8 +331,9 @@ async function startServer() {
     try {
       const success = await elderlyRepo.delete(req.params.id);
       res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ error: "Internal Server Error" });
+    } catch (error: any) {
+      console.error("DELETE /api/elderly-profile/:id error:", error);
+      res.status(500).json({ success: false, message: error.message || "伺服器內部錯誤" });
     }
   });
 
@@ -343,6 +344,17 @@ async function startServer() {
       res.json(contacts);
     } catch (error) {
       res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  app.post("/api/emergency-contacts/sync-all", async (req, res) => {
+    try {
+      const { elderly_id, contacts } = req.body;
+      const success = await contactRepo.syncAll(elderly_id, contacts);
+      res.json({ success });
+    } catch (error: any) {
+      console.error("Error syncing contacts:", error);
+      res.status(500).json({ success: false, message: error.message });
     }
   });
 

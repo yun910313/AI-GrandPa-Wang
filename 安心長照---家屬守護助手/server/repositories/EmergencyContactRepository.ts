@@ -77,9 +77,9 @@ export class EmergencyContactRepository {
                 .input('sort_order', sql.Int, data.sort_order)
                 .query(`
                     UPDATE contacts SET
-                        name = @name,
-                        relationship = @relationship,
-                        phone = @phone,
+                        name = ISNULL(@name, name),
+                        relationship = ISNULL(@relationship, relationship),
+                        phone = ISNULL(@phone, phone),
                         sort_order = ISNULL(@sort_order, sort_order)
                     WHERE id = @id
                 `);
@@ -127,6 +127,75 @@ export class EmergencyContactRepository {
             return (result.rowsAffected?.[0] ?? 0) > 0;
         } catch (err) {
             console.error('EmergencyContactRepository.delete Error:', err);
+            throw err;
+        } finally {
+            if (pool) await pool.close();
+        }
+    }
+
+    /**
+     * 批次同步聯絡人與排序 (根據長輩 ID) - 改進版：保留 ID 以避免跨端衝突
+     */
+    async syncAll(elderlyId: string, contacts: any[]): Promise<boolean> {
+        let pool;
+        try {
+            pool = await ConnectionFactory.createConnection();
+
+            // 獲取該長輩的 guardian_id
+            const elderlyRes = await pool.request()
+                .input('eid', sql.UniqueIdentifier, elderlyId)
+                .query('SELECT guardian_id FROM elderly_profiles WHERE id = @eid');
+            const guardianId = elderlyRes.recordset[0]?.guardian_id;
+
+            // 1. 獲取傳入資料中的所有有效 ID
+            const incomingIds = contacts
+                .filter(c => c.id && typeof c.id === 'string' && c.id.length > 10)
+                .map(c => c.id);
+
+            // 2. 刪除不在傳入名單中的現有聯絡人
+            const deleteRequest = pool.request();
+            deleteRequest.input('eid', sql.UniqueIdentifier, elderlyId);
+            let deleteQuery = 'DELETE FROM contacts WHERE elderly_id = @eid';
+            if (incomingIds.length > 0) {
+                const idParams = incomingIds.map((id, index) => `@id${index}`);
+                incomingIds.forEach((id, index) => deleteRequest.input(`id${index}`, sql.UniqueIdentifier, id));
+                deleteQuery += ` AND id NOT IN (${idParams.join(',')})`;
+            }
+            await deleteRequest.query(deleteQuery);
+
+            // 3. 逐一更新或新增
+            for (let i = 0; i < contacts.length; i++) {
+                const c = contacts[i];
+                const request = pool.request()
+                    .input('name', sql.NVarChar(100), c.name)
+                    .input('relationship', sql.NVarChar(50), c.relationship)
+                    .input('phone', sql.NVarChar(20), c.phone)
+                    .input('guardian_id', sql.UniqueIdentifier, guardianId)
+                    .input('elderly_id', sql.UniqueIdentifier, elderlyId)
+                    .input('sort_order', sql.Int, i + 1);
+
+                if (c.id && typeof c.id === 'string' && c.id.length > 10) {
+                    await request
+                        .input('id', sql.UniqueIdentifier, c.id)
+                        .query(`
+                            UPDATE contacts SET 
+                                name = @name, 
+                                relationship = @relationship, 
+                                phone = @phone, 
+                                sort_order = @sort_order,
+                                guardian_id = ISNULL(@guardian_id, guardian_id)
+                            WHERE id = @id
+                        `);
+                } else {
+                    await request.query(`
+                        INSERT INTO contacts (name, relationship, phone, guardian_id, elderly_id, sort_order, created_at)
+                        VALUES (@name, @relationship, @phone, @guardian_id, @elderly_id, @sort_order, SYSDATETIMEOFFSET())
+                    `);
+                }
+            }
+            return true;
+        } catch (err) {
+            console.error('EmergencyContactRepository.syncAll Error:', err);
             throw err;
         } finally {
             if (pool) await pool.close();

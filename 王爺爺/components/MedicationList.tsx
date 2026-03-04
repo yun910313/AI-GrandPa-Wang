@@ -23,7 +23,6 @@ const MedicationList: React.FC<MedicationListProps> = ({ onBack, elderlyId }) =>
 
   const speak = useCallback((text: string) => {
     if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'zh-TW';
       utterance.rate = 0.9;
@@ -44,6 +43,8 @@ const MedicationList: React.FC<MedicationListProps> = ({ onBack, elderlyId }) =>
 
   useEffect(() => {
     fetchMeds();
+    const interval = setInterval(fetchMeds, 15000); // 每 15 秒自動重新獲取最新藥物資料
+    return () => clearInterval(interval);
   }, [fetchMeds]);
 
   const toggleTaken = async (med: Medication) => {
@@ -165,56 +166,47 @@ const MedicationList: React.FC<MedicationListProps> = ({ onBack, elderlyId }) =>
       recognition.onend = () => setIsListening(false);
       recognitionRef.current = recognition;
     }
-  }, [meds]);
+  }, [meds, speak]); // Added speak to dependencies
 
   const handleVoiceCommand = async (command: string) => {
     setAiStatus("正在思考中...");
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const currentStatus = meds.map(m => `[ID:${m.id}] ${m.name}(時間:${m.reminder_time}, 狀態:${m.is_taken === 1 ? '已標記吃過' : '還沒吃'})`).join(', ');
-
-      const prompt = `
-        你是一位極其親切、溫暖、有耐心的「銀髮族暖心管家」。
-        目前藥物清單：${currentStatus}。
-        使用者剛才說：「${command}」。
-
-        任務：
-        1. 意圖辨識：判斷使用者是否表示藥吃完了、詢問還有什麼藥、或是純問候。
-        2. 模糊比對：從清單中找出最接近的項目。
-        3. 溫暖回覆：給予讚美與關心。
-
-        意圖分類：
-        - "complete_one": 標記某項藥物已服用。
-        - "complete_all": 標記目前所有「還沒吃」的藥物都已服用。
-        - "check_status": 詢問還有哪些藥要吃。
-        - "none": 純聊天或無法辨識。
-
-        回傳 JSON 格式：
-        {
-          "reply": "（繁體中文）溫暖回覆",
-          "action": "complete_one" | "complete_all" | "check_status" | "none",
-          "targetId": "藥物ID" | null
-        }
-      `;
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: { parts: [{ text: prompt }] },
-        config: { responseMimeType: "application/json" }
+      // 改為呼叫後端 API，避免前端直接暴露 API Key
+      const response = await fetch('/api/medication/ai-command', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          command,
+          meds
+        })
       });
 
-      const result = JSON.parse(response.text || '{}');
+      if (!response.ok) {
+        if (response.status === 404) throw new Error("伺服器找不到語音處理路徑，請嘗試重新啟動專案。");
+        const errData = await response.json();
+        const details = errData.suggestion || errData.details || "AI 服務暫時無法回應";
+        throw new Error(details);
+      }
+
+      const result = await response.json();
 
       if (result.action === 'complete_one' && result.targetId) {
-        setMeds(prev => prev.map(m => String(m.id) === String(result.targetId) ? { ...m, taken: true } : m));
+        const med = meds.find(m => String(m.id) === String(result.targetId));
+        if (med && med.is_taken !== 1) {
+          await toggleTaken(med);
+        }
       } else if (result.action === 'complete_all') {
-        setMeds(prev => prev.map(m => ({ ...m, taken: true })));
+        const pendingMeds = meds.filter(m => m.is_taken !== 1);
+        for (const med of pendingMeds) {
+          await toggleTaken(med);
+        }
       }
 
       setAiStatus(result.reply);
       speak(result.reply);
-    } catch (err) {
-      const errorMsg = "抱歉，我剛剛分心了，可以請您再跟我說一遍嗎？";
+    } catch (err: any) {
+      console.error("AI Medication Error:", err);
+      const errorMsg = err.message.includes("403") ? "辨識服務目前金鑰失效，請通知家屬更新。" : "抱歉，我剛剛分心了，可以請您再跟我說一遍嗎？";
       setAiStatus(errorMsg);
       speak(errorMsg);
     }

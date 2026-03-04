@@ -12,6 +12,8 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppTab>(AppTab.HOME);
   const [user, setUser] = useState<any>(null);
   const [initialized, setInitialized] = useState(false);
+  const isFirstRender = React.useRef(true);
+  const silenceNextNavigation = React.useRef(false);
 
   useEffect(() => {
     const savedUser = localStorage.getItem('wang_user');
@@ -21,15 +23,90 @@ const App: React.FC = () => {
     setInitialized(true);
   }, []);
 
-  const speak = useCallback((text: string) => {
+  // --- 背景 GPS 定位回報 ---
+  useEffect(() => {
+    if (!user || !user.elderly_id) return;
+
+    let watchId: number | null = null;
+
+    const sendLocation = async (lat: number, lng: number) => {
+      try {
+        await fetch('/api/gps-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            elderly_id: user.elderly_id,
+            latitude: lat,
+            longitude: lng,
+            address: "長輩端自動定位"
+          })
+        });
+      } catch (err) {
+        console.warn("GPS reporting failed", err);
+      }
+    };
+
+    if ("geolocation" in navigator) {
+      // 首次立即獲取
+      navigator.geolocation.getCurrentPosition(
+        (pos) => sendLocation(pos.coords.latitude, pos.coords.longitude),
+        (err) => console.warn("GPS Init Error", err),
+        { enableHighAccuracy: true }
+      );
+
+      // 持續監控
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          sendLocation(pos.coords.latitude, pos.coords.longitude);
+        },
+        (err) => console.warn("GPS Watch Error", err),
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+      );
+    }
+
+    return () => {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    };
+  }, [user]);
+
+  const speak = useCallback((text: string, ignoreCancel = false) => {
     if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
+      if (!ignoreCancel) {
+        window.speechSynthesis.cancel();
+      }
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'zh-TW';
       utterance.rate = 1.2;
       window.speechSynthesis.speak(utterance);
     }
   }, []);
+
+  // --- 切換功能語音提醒 ---
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+
+    if (silenceNextNavigation.current) {
+      silenceNextNavigation.current = false;
+      return;
+    }
+
+    const labels: Record<AppTab, string> = {
+      [AppTab.HOME]: '首頁',
+      [AppTab.MEDS]: '服藥清單',
+      [AppTab.HEALTH]: '健康數據',
+      [AppTab.CHAT]: '聊天助理',
+      [AppTab.VISION]: '影像辨識功能',
+    };
+
+    if (activeTab === AppTab.VISION) {
+      speak(`已切換到${labels[activeTab]}`, true);
+    } else {
+      speak(`現在切換到${labels[activeTab]}`);
+    }
+  }, [activeTab, speak]);
 
   const handleLoginSuccess = (userData: any) => {
     setUser(userData);
@@ -42,12 +119,13 @@ const App: React.FC = () => {
     localStorage.removeItem('wang_user');
   };
 
-  const goToHome = () => {
+  const goToHome = (silent = false) => {
+    if (silent) silenceNextNavigation.current = true;
     setActiveTab(AppTab.HOME);
-    speak("返回首頁");
   };
 
-  const handleNavigate = (tab: AppTab) => {
+  const handleNavigate = (tab: AppTab, silent = false) => {
+    if (silent) silenceNextNavigation.current = true;
     setActiveTab(tab);
   };
 
@@ -62,17 +140,17 @@ const App: React.FC = () => {
   const renderContent = () => {
     switch (activeTab) {
       case AppTab.HOME:
-        return <Dashboard onVoiceCall={() => setActiveTab(AppTab.CHAT)} onNavigate={handleNavigate} elderlyId={user.elderly_id} />;
+        return <Dashboard onVoiceCall={() => handleNavigate(AppTab.CHAT)} onNavigate={handleNavigate} elderlyId={user.elderly_id} />;
       case AppTab.MEDS:
-        return <MedicationList onBack={goToHome} elderlyId={user.elderly_id} />;
+        return <MedicationList onBack={() => goToHome()} elderlyId={user.elderly_id} />;
       case AppTab.HEALTH:
-        return <HealthMonitor onBack={goToHome} elderlyId={user.elderly_id} />;
+        return <HealthMonitor onBack={() => goToHome()} elderlyId={user.elderly_id} />;
       case AppTab.CHAT:
-        return <LiveVoiceChat onBack={goToHome} />;
+        return <LiveVoiceChat onBack={() => goToHome(true)} />;
       case AppTab.VISION:
-        return <VisionAssistant onBack={goToHome} />;
+        return <VisionAssistant onBack={() => goToHome()} />;
       default:
-        return <Dashboard onVoiceCall={() => setActiveTab(AppTab.CHAT)} onNavigate={handleNavigate} elderlyId={user.elderly_id} />;
+        return <Dashboard onVoiceCall={() => handleNavigate(AppTab.CHAT)} onNavigate={handleNavigate} elderlyId={user.elderly_id} />;
     }
   };
 

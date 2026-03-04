@@ -21,9 +21,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate, elderlyI
 
   const countdownInterval = useRef<number | null>(null);
 
-  const speak = useCallback((text: string) => {
+  const speak = useCallback((text: string, forceInterrupt = false) => {
     if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
+      if (forceInterrupt) {
+        window.speechSynthesis.cancel();
+      }
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'zh-TW';
       utterance.rate = 1.0;
@@ -100,15 +102,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate, elderlyI
 
         const filtered = currentMeds.filter(m => m.is_taken !== 1);
         setPendingMeds(filtered);
-
-        // 自動語音提醒：僅在第一次載入且有待服藥時執行
-        if (filtered.length > 0 && !hasSpokenReminder.current) {
-          const timer = setTimeout(() => {
-            speak(`王爺爺，記得要吃藥喔！您今天還有${filtered[0].name}等藥物還沒吃，身體要顧好喔。`);
-            hasSpokenReminder.current = true;
-          }, 1500);
-          return () => clearTimeout(timer);
-        }
       } catch (error) {
         console.error('Fetch meds error in Dashboard:', error);
       }
@@ -116,7 +109,25 @@ const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate, elderlyI
     fetchMeds();
     const interval = setInterval(fetchMeds, 30000); // 每30秒更新一次藥物清單
     return () => clearInterval(interval);
-  }, [speak, elderlyId]);
+  }, [elderlyId]);
+
+  // 新增獨立的語音提醒 Effect，支援組件卸載時自動清除計時器
+  useEffect(() => {
+    let timerId: number | null = null;
+
+    if (pendingMeds.length > 0 && !hasSpokenReminder.current) {
+      timerId = window.setTimeout(() => {
+        speak(`王爺爺，記得要吃藥喔！您今天還有${pendingMeds[0].name}等藥物還沒吃，身體要顧好喔。`);
+        hasSpokenReminder.current = true;
+      }, 3000);
+    }
+
+    return () => {
+      if (timerId) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [pendingMeds, speak]);
 
   useEffect(() => {
     if (isCountingDown) {
@@ -141,7 +152,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate, elderlyI
   const initiateSOS = () => {
     setShowSOSConfirm(false);
     setIsCountingDown(true);
-    speak("即將啟動緊急求援，倒數五秒。");
+    speak("即將啟動緊急求援，倒數五秒。", true);
   };
 
   const startSOSSequence = () => {
@@ -149,7 +160,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate, elderlyI
     setCurrentSOSIndex(0);
     const firstContact = profile.emergencyContacts[0];
     if (firstContact) {
-      speak(`正在撥打給第一順位聯絡人：${firstContact.name}`);
+      speak(`正在撥打給第一順位聯絡人：${firstContact.name}`, true);
     }
   };
 
@@ -157,10 +168,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate, elderlyI
     if (currentSOSIndex < profile.emergencyContacts.length - 1) {
       const nextIdx = currentSOSIndex + 1;
       setCurrentSOSIndex(nextIdx);
-      speak(`正在撥打給第${nextIdx + 1}順位聯絡人：${profile.emergencyContacts[nextIdx].name}`);
+      speak(`正在撥打給第${nextIdx + 1}順位聯絡人：${profile.emergencyContacts[nextIdx].name}`, true);
     } else {
       setCurrentSOSIndex(999);
-      speak("正在撥打 1 1 9 緊急救援中心。");
+      speak("正在撥打 1 1 9 緊急救援中心。", true);
     }
   };
 
@@ -168,11 +179,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate, elderlyI
     if (currentSOSIndex === 999) {
       const lastIdx = profile.emergencyContacts.length - 1;
       setCurrentSOSIndex(lastIdx);
-      speak(`返回撥打給第${lastIdx + 1}順位聯絡人：${profile.emergencyContacts[lastIdx].name}`);
+      speak(`返回撥打給第${lastIdx + 1}順位聯絡人：${profile.emergencyContacts[lastIdx].name}`, true);
     } else if (currentSOSIndex > 0) {
       const prevIdx = currentSOSIndex - 1;
       setCurrentSOSIndex(prevIdx);
-      speak(`返回撥打給第${prevIdx + 1}順位聯絡人：${profile.emergencyContacts[prevIdx].name}`);
+      speak(`返回撥打給第${prevIdx + 1}順位聯絡人：${profile.emergencyContacts[prevIdx].name}`, true);
     }
   };
 
@@ -182,7 +193,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate, elderlyI
     setIsSOSActive(false);
     setCurrentSOSIndex(-1);
     setCountdown(5);
-    speak("已取消求助。");
+    speak("已取消求助。", true);
   };
 
   const saveProfile = async () => {
@@ -288,7 +299,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate, elderlyI
 
       {/* 高飽和度吃藥提醒區塊 */}
       <div
-        onClick={() => { speak(`您今天還有${pendingMeds.length}次藥還沒吃。點擊我查看完整清單。`); onNavigate(AppTab.MEDS); }}
+        onClick={() => { onNavigate(AppTab.MEDS); }}
         className={`rounded-[56px] p-10 shadow-[0_20px_50px_rgba(255,165,0,0.3)] transition-all active:scale-[0.96] cursor-pointer overflow-hidden relative border-b-8 ${pendingMeds.length > 0
           ? 'bg-gradient-to-br from-orange-500 to-red-600 text-white border-red-700'
           : 'bg-gradient-to-br from-emerald-500 to-green-600 text-white border-green-700'
@@ -367,21 +378,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate, elderlyI
       {/* 高飽和度功能按鈕網格 */}
       <div className="grid grid-cols-3 gap-4">
         <button
-          onClick={() => { speak("前往吃藥提醒"); onNavigate(AppTab.MEDS); }}
+          onClick={() => { onNavigate(AppTab.MEDS); }}
           className="bg-orange-600 h-32 rounded-[32px] flex flex-col items-center justify-center text-white shadow-lg active:scale-95 transition-all"
         >
           <i className="fas fa-pills text-3xl mb-2"></i>
           <span className="text-xl font-black">吃藥</span>
         </button>
         <button
-          onClick={() => { speak("前往影像辨識"); onNavigate(AppTab.VISION); }}
+          onClick={() => { onNavigate(AppTab.VISION); }}
           className="bg-blue-600 h-32 rounded-[32px] flex flex-col items-center justify-center text-white shadow-lg active:scale-95 transition-all"
         >
           <i className="fas fa-eye text-3xl mb-2"></i>
           <span className="text-xl font-black">辨識</span>
         </button>
         <button
-          onClick={() => { speak("前往健康狀態"); onNavigate(AppTab.HEALTH); }}
+          onClick={() => { onNavigate(AppTab.HEALTH); }}
           className="bg-green-600 h-32 rounded-[32px] flex flex-col items-center justify-center text-white shadow-lg active:scale-95 transition-all"
         >
           <i className="fas fa-heartbeat text-3xl mb-2"></i>
@@ -394,7 +405,6 @@ const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate, elderlyI
         <h3 className="text-2xl font-black text-slate-800">暖心助理</h3>
         <button
           onClick={() => {
-            speak("點擊頭像，我陪您聊天。");
             onVoiceCall();
           }}
           className="relative group active:scale-95 transition-all"
@@ -463,7 +473,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onVoiceCall, onNavigate, elderlyI
       {/* Status Summary */}
       <div className="grid grid-cols-2 gap-6">
         <div
-          onClick={() => { speak(`今日最新心率是${vitalSigns.hr}下。`); onNavigate(AppTab.HEALTH); }}
+          onClick={() => { onNavigate(AppTab.HEALTH); }}
           className="bg-white p-6 rounded-[36px] shadow-sm border border-slate-100 text-center active:bg-slate-50 cursor-pointer"
         >
           <div className="text-rose-500 mb-3"><i className="fas fa-heart-pulse text-3xl"></i></div>

@@ -41,9 +41,11 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
     { id: 'general', label: '看四周', icon: 'fa-eye', color: 'bg-slate-500', hint: '讓我為您描述世界' },
   ] as const;
 
-  const speak = useCallback((text: string) => {
+  const speak = useCallback((text: string, ignoreCancel = false) => {
     if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
+      if (!ignoreCancel) {
+        window.speechSynthesis.cancel();
+      }
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'zh-TW';
       utterance.rate = 1.0;
@@ -66,9 +68,14 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
       case 'food': modePrompt = "請辨識這份食物是什麼，粗估熱量與營養。"; break;
       case 'text': modePrompt = "請朗讀照片中的所有文字內容。"; break;
       case 'find':
-        modePrompt = `請在此場景中尋找「${findTarget || '眼鏡、鑰匙、遙控器'}」。如果看到了，請具體描述它的方位（如：在桌子的左上角、在電視櫃下方）。如果沒看到，請列出看到的所有物品。`;
+        modePrompt = `【最新請求：尋物任務】請在當前這張照片中，仔細尋找「${findTarget || '眼鏡、鑰匙、遙控器'}」。
+        1. 方位描述：如果發現了它，請描述具體方位（例如：在畫面左側、桌子的角落、或是靠近某個顏色鮮艷的物體旁邊）。
+        2. 特徵確認：說明辨識到的物品特徵（如顏色、形狀），以確保正確。
+        3. 引導：如果它只露出一部分，請提醒使用者。
+        4. 沒看到時：請大聲說出「目前沒看到 ${findTarget}」，並簡述畫面中有什麼（如：我看到了沙發和枕頭），證明您已重新掃視。
+        不要憑空想像先前提到過的物品，必須以「當下這張照片」為準。`;
         break;
-      case 'general': modePrompt = "請用溫暖的口吻描述這個場景，讓視力不好的長者也能理解。"; break;
+      case 'general': modePrompt = "這是一張來自監視器的即時截圖。請用溫暖的口吻描述這個場景，讓視力不好的長者也能理解。每次辨識都要根據當前畫面來敘述，不要重複同樣的對話內容。"; break;
     }
 
     const video = videoRef.current;
@@ -131,7 +138,11 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
       setResult(text);
 
       const segments = text.split(/【|】/);
-      const summary = segments.find((_, i) => segments[i - 1] === '大意') || segments[0];
+      // 精準抓取標籤內容。若沒抓到特定標籤，則朗讀前兩段非空內容或全文
+      let summary = segments.find((_, i) => segments[i - 1] === '大意' || segments[i - 1] === '重點摘要' || segments[i - 1] === '結果');
+      if (!summary || summary.trim().length < 2) {
+        summary = segments.filter(s => s.trim().length > 3)[0] || text;
+      }
       speak(summary);
     } catch (err: any) {
       console.error("辨識錯誤:", err);
@@ -188,12 +199,14 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
         refreshDevices();
       }, 500);
 
-      speak(deviceId ? "相機切換完成。" : "影像辨識功能已開啟，您可以按下按鈕辨識物品。");
+      speak(deviceId ? "相機切換完成。" : "影像辨識功能已開啟，您可以按下按鈕辨識物品。", true);
     } catch (err) {
       console.error("無法開啟相機:", err);
       speak("相機開啟失敗，請檢查權限設定。");
     }
   };
+
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     startCamera();
@@ -204,20 +217,55 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitRecognition;
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition();
-      recognition.continuous = false;
+      recognition.continuous = true; // 改為連續模式，讓使用者可以停頓
       recognition.lang = 'zh-TW';
+      recognition.interimResults = true;
+
       recognition.onresult = (event: any) => {
-        const text = event.results[0][0].transcript.replace(/[。？！]/g, '');
-        setFindTarget(text);
-        speak(`好的，我會幫您尋找${text}。請按下下方的立即辨識按鈕。`);
-        setIsListeningTarget(false);
+        let finalTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          }
+        }
+
+        if (finalTranscript) {
+          const text = finalTranscript.replace(/[。？！]/g, '').trim();
+          if (text) {
+            setFindTarget(prev => text);
+          }
+        }
+
+        // 靜默偵測：重設計時器
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = setTimeout(() => {
+          recognition.stop();
+        }, 2500); // 停頓 2.5 秒自動結束
       };
-      recognition.onend = () => setIsListeningTarget(false);
+
+      recognition.onstart = () => {
+        setIsListeningTarget(true);
+      };
+
+      recognition.onend = () => {
+        setIsListeningTarget(false);
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        // 只有在真的有抓到目標時才說話
+        setFindTarget(current => {
+          if (current) {
+            speak(`好的，我會幫您尋找${current}。請按下下方的藍色按鈕。`);
+          }
+          return current;
+        });
+      };
+
+      recognition.onerror = () => setIsListeningTarget(false);
       targetRecognitionRef.current = recognition;
     }
 
     return () => {
       if (stream) stream.getTracks().forEach(track => track.stop());
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     };
   }, []);
 
@@ -250,9 +298,13 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
 
   const startFindTargetVoice = () => {
     if (targetRecognitionRef.current) {
-      setIsListeningTarget(true);
-      speak("請問您要找什麼？請說出物品名稱。");
-      targetRecognitionRef.current.start();
+      try {
+        setFindTarget(''); // 每次點擊語音辨識前先清除舊的尋找目標
+        speak("請問您要找什麼？請說出物品名稱。");
+        targetRecognitionRef.current.start();
+      } catch (e) {
+        console.warn("語音辨識已在執行中或啟動失敗");
+      }
     }
   };
 
@@ -342,21 +394,45 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
           )}
         </div>
 
-        {/* 尋物模式專屬語音輸入 UI */}
+        {/* 尋物模式專屬語音與手動輸入 UI */}
         {mode === 'find' && (
-          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-30 w-full px-6">
+          <div className="absolute top-24 left-1/2 -translate-x-1/2 z-30 w-full px-6 flex flex-col gap-3">
             <button
               onClick={startFindTargetVoice}
-              className={`w-full py-4 rounded-3xl backdrop-blur-md border-2 transition-all flex items-center justify-center gap-4 ${isListeningTarget
-                ? 'bg-emerald-500 border-white animate-pulse'
+              disabled={isListeningTarget}
+              className={`w-full py-5 rounded-3xl backdrop-blur-md border-2 transition-all flex flex-col items-center justify-center gap-2 shadow-xl ${isListeningTarget
+                ? 'bg-rose-500 border-white shadow-[0_0_20px_rgba(244,63,94,0.5)]'
                 : 'bg-black/40 border-white/20'
                 }`}
             >
-              <i className={`fas ${isListeningTarget ? 'fa-circle' : 'fa-microphone'} text-white`}></i>
-              <span className="text-white font-black text-xl">
-                {isListeningTarget ? '正在聽...' : (findTarget ? `正在找：${findTarget}` : '告訴我要找什麼')}
-              </span>
+              <div className="flex items-center gap-4">
+                <i className={`fas ${isListeningTarget ? 'fa-assistive-listening-systems text-3xl' : 'fa-microphone text-xl'} text-white`}></i>
+                <span className="text-white font-black text-2xl">
+                  {isListeningTarget ? '正在聽您說話...' : (findTarget ? `正在找：${findTarget}` : '想找什麼？請點我說話')}
+                </span>
+              </div>
+              {isListeningTarget && (
+                <span className="text-white/80 text-sm font-bold animate-pulse">說完請停頓一下，我會自動幫您設定</span>
+              )}
             </button>
+
+            <div className="relative group">
+              <input
+                type="text"
+                value={findTarget}
+                onChange={(e) => setFindTarget(e.target.value)}
+                placeholder="或直接在此輸入名稱..."
+                className="w-full py-4 px-6 rounded-2xl bg-black/60 backdrop-blur-md border-2 border-white/10 text-white font-black text-lg placeholder:text-white/30 focus:border-blue-500/50 outline-none transition-all shadow-lg"
+              />
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2 pointer-events-none text-white/30">
+                <i className="fas fa-keyboard"></i>
+              </div>
+            </div>
+            {findTarget && !isListeningTarget && (
+              <p className="text-center text-blue-400 text-lg font-black animate-bounce bg-black/40 py-2 rounded-full backdrop-blur-sm">
+                <i className="fas fa-arrow-down mr-2"></i> 已設定目標，請按下方「立即辨識」
+              </p>
+            )}
           </div>
         )}
 
@@ -413,6 +489,7 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
               {isAnalyzing ? (
                 <div className="text-center py-10">
                   <i className="fas fa-circle-notch animate-spin text-4xl text-blue-600"></i>
+                  <p className="mt-4 text-slate-500 font-bold">正在認真看圖中，請稍候...</p>
                 </div>
               ) : segments.length > 0 ? (
                 segments.map((seg, idx) => (
@@ -435,10 +512,10 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
                 </div>
               ) : (
                 <p
-                  onClick={() => speak(mode === 'find' ? "請對準可能遺失物品的區域，然後按下方的立即辨識按鈕。" : "請對準物品並按下方的辨識按鈕。")}
+                  onClick={() => speak(mode === 'find' ? (findTarget ? `已準備好找${findTarget}，請按下方的立即辨識。` : "請點擊上方的紫色按鈕，並說出您要找什麼。") : "請對準物品並按下方的辨識按鈕。")}
                   className="text-slate-400 text-center font-black py-6 cursor-pointer text-2xl"
                 >
-                  {mode === 'find' ? '請對準遺失區域並辨識' : '請對準物品並按下方的按鈕'}
+                  {mode === 'find' ? (findTarget ? `準備尋找：${findTarget}` : '請先點擊語音說出要找什麼') : '請對準物品並點擊下方按鈕'}
                 </p>
               )}
             </div>
@@ -450,7 +527,7 @@ const VisionAssistant: React.FC<VisionAssistantProps> = ({ onBack }) => {
             className={`w-full py-6 rounded-[32px] text-2xl font-black shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-3 shrink-0 ${isAnalyzing ? 'bg-slate-200 text-slate-400' : 'bg-blue-600 text-white'
               }`}
           >
-            {isAnalyzing ? '辨識中...' : <><i className="fas fa-camera"></i> 立即辨識</>}
+            {isAnalyzing ? '正在辨識...' : <><i className="fas fa-camera"></i> 立即辨識</>}
           </button>
         </div>
       </div>
