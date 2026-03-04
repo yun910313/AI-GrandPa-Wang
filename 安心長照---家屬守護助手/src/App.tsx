@@ -195,6 +195,22 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
   };
 
   useEffect(() => {
+    const currentId = selectedId || '';
+
+    // 將所有資料獲取邏輯封裝
+    const fetchDashboardData = () => {
+      if (!currentId) return;
+      // 同步長輩基本資料與清單
+      safeFetch('/api/elderly-profiles', setProfiles);
+      // 同步動態資料
+      safeFetch(`/api/gps-latest?elderly_id=${currentId}`, setLatestGps);
+      safeFetch(`/api/medications?elderly_id=${currentId}`, setMeds);
+      safeFetch(`/api/vital-signs-latest?elderly_id=${currentId}`, setVitals);
+      safeFetch(`/api/medical-records?elderly_id=${currentId}`, setMedicalRecords);
+    };
+
+    // 初始獲取關鍵資料
+    safeFetch(`/api/user-profile?id=${user?.id}`, setUserProfile);
     safeFetch('/api/elderly-profiles', (data) => {
       setProfiles(data);
       if (!selectedId && data.length > 0) {
@@ -202,18 +218,12 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
       }
     });
 
-    const currentId = selectedId || '';
-    safeFetch(`/api/gps-latest?elderly_id=${currentId}`, setLatestGps);
-    safeFetch(`/api/medications?elderly_id=${currentId}`, setMeds);
-    safeFetch(`/api/vital-signs-latest?elderly_id=${currentId}`, setVitals);
-    safeFetch(`/api/user-profile?id=${user?.id}`, setUserProfile);
-    safeFetch(`/api/medical-records?elderly_id=${currentId}`, setMedicalRecords);
+    fetchDashboardData();
 
-    const interval = setInterval(() => {
-      safeFetch(`/api/vital-signs-latest?elderly_id=${currentId}`, setVitals);
-    }, 5000);
+    // 設置同步定時器（每 10 秒同步一次所有關鍵資料）
+    const interval = setInterval(fetchDashboardData, 10000);
     return () => clearInterval(interval);
-  }, [selectedId]);
+  }, [selectedId, user?.id, onSelectId]);
 
   // GPS 座標更新時，自動反向地理編碼取得繁體中文地址
   useEffect(() => {
@@ -306,7 +316,12 @@ const Dashboard = ({ onNavigate, selectedId, onSelectId, user }: { onNavigate: (
               )}
             </div>
             <p className="text-slate-900 font-medium mb-1">{gpsChineseAddress || (latestGps ? '地址查詢中...' : '讀取中...')}</p>
-            <p className="text-slate-500 text-xs">最後更新: {latestGps ? format(new Date(latestGps.timestamp), 'HH:mm') : '--:--'}</p>
+            <p className="text-slate-500 text-xs">
+              最後更新: {latestGps ? (() => {
+                const d = new Date(latestGps.timestamp);
+                return isNaN(d.getTime()) ? '--:--' : format(d, 'MM/dd HH:mm');
+              })() : '--:--'}
+            </p>
           </div>
           <ChevronRight className="text-slate-400 self-center" size={20} />
         </div>
@@ -401,7 +416,9 @@ const MedicalRecordsView = ({ onBack, selectedId }: { onBack: () => void, select
 
   useEffect(() => {
     fetchRecords();
-  }, []);
+    const interval = setInterval(fetchRecords, 10000); // 10秒同步一次
+    return () => clearInterval(interval);
+  }, [selectedId]);
 
   const handleEdit = (record: MedicalRecord) => {
     setFormData({
@@ -653,7 +670,9 @@ const MedicationView = ({ onBack, selectedId, user }: { onBack: () => void, sele
 
   useEffect(() => {
     fetchMeds();
-  }, []);
+    const interval = setInterval(fetchMeds, 10000); // 10秒同步一次
+    return () => clearInterval(interval);
+  }, [selectedId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -832,7 +851,9 @@ const TestResultsView = ({ onBack, selectedId }: { onBack: () => void, selectedI
 
   useEffect(() => {
     fetchResults();
-  }, []);
+    const interval = setInterval(fetchResults, 10000); // 10秒同步一次
+    return () => clearInterval(interval);
+  }, [selectedId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1089,7 +1110,12 @@ const GPSView = ({ onBack, selectedId }: { onBack: () => void, selectedId: strin
                 <p className="text-xs text-slate-500 truncate">{displayAddress || (latest ? '地址查詢中...' : '定位中...')}</p>
               </div>
               <div className="text-right text-[0.625rem] text-slate-400 flex-shrink-0">
-                <p>{latest ? format(new Date(latest.timestamp), 'HH:mm') : '--:--'}</p>
+                <p className="font-mono bg-slate-100 px-1 rounded">
+                  {latest ? (() => {
+                    const d = new Date(latest.timestamp);
+                    return isNaN(d.getTime()) ? '--:--' : format(d, 'HH:mm');
+                  })() : '--:--'}
+                </p>
                 {elderly?.safe_zone_lat && elderly?.safe_zone_lng ? (
                   latest ? (
                     (() => {
@@ -1131,7 +1157,12 @@ const GPSView = ({ onBack, selectedId }: { onBack: () => void, selectedId: strin
           </div>
           <div className="flex justify-between items-center text-sm">
             <span className="text-slate-500">更新時間</span>
-            <span className="font-medium text-slate-700">{latest ? format(new Date(latest.timestamp), 'yyyy/MM/dd HH:mm') : '--'}</span>
+            <span className="font-medium text-slate-700">
+              {latest ? (() => {
+                const d = new Date(latest.timestamp);
+                return isNaN(d.getTime()) ? '--' : format(d, 'yyyy/MM/dd HH:mm');
+              })() : '--'}
+            </span>
           </div>
         </Card>
 
@@ -1438,7 +1469,7 @@ const EditProfileView = ({ onBack, user }: { onBack: () => void, user: any }) =>
   );
 };
 
-const EditElderlyView = ({ onBack, user }: { onBack: () => void, user: any }) => {
+const EditElderlyView = ({ onBack, user, selectedId, onSelectId }: { onBack: () => void, user: any, selectedId: string | null, onSelectId: (id: string | null) => void }) => {
   const [profiles, setProfiles] = useState<ElderlyProfile[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1540,6 +1571,8 @@ const EditElderlyView = ({ onBack, user }: { onBack: () => void, user: any }) =>
 
   useEffect(() => {
     fetchProfiles();
+    const interval = setInterval(fetchProfiles, 10000); // 10秒同步一次
+    return () => clearInterval(interval);
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -1585,9 +1618,21 @@ const EditElderlyView = ({ onBack, user }: { onBack: () => void, user: any }) =>
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('確定要刪除這位長輩的資料嗎？')) return;
+    if (!window.confirm('確定要刪除這位長輩的資料嗎？一旦刪除，所有的生理數據與用藥紀錄也將一併移除，且無法復原。')) return;
     const res = await fetch(`/api/elderly-profile/${id}`, { method: 'DELETE' });
-    if (res.ok) fetchProfiles();
+    if (res.ok) {
+      if (selectedId === id) {
+        onSelectId(null);
+        localStorage.removeItem('selectedElderlyId');
+      }
+      setIsAdding(false);
+      setEditingId(null);
+      fetchProfiles();
+      alert('長輩資料已成功刪除。');
+    } else {
+      const errorData = await res.json();
+      alert(`刪除失敗: ${errorData.message || '伺服器拒絕請求'}`);
+    }
   };
 
   const handleEdit = (profile: ElderlyProfile) => {
@@ -1819,6 +1864,18 @@ const EditElderlyView = ({ onBack, user }: { onBack: () => void, user: any }) =>
           >
             {submitting ? '儲存中...' : (editingId ? '儲存修改' : '立即新增')}
           </motion.button>
+
+          {editingId && (
+            <motion.button
+              whileTap={{ scale: 0.98 }}
+              type="button"
+              onClick={() => handleDelete(editingId)}
+              className="w-full mt-2 bg-white text-rose-600 font-bold py-4 rounded-xl border-2 border-rose-100 hover:bg-rose-50 transition-all flex items-center justify-center gap-2"
+            >
+              <Trash2 size={18} />
+              <span>刪除此長輩資料</span>
+            </motion.button>
+          )}
         </form>
       ) : (
         <div className="space-y-4">
@@ -1833,9 +1890,21 @@ const EditElderlyView = ({ onBack, user }: { onBack: () => void, user: any }) =>
                   <p className="text-xs text-slate-500">{p.age} 歲 | {p.gender}</p>
                 </div>
               </div>
-              <div className="flex gap-2">
-                <button onClick={() => handleEdit(p)} className="p-2 text-slate-400 hover:text-indigo-600"><Edit2 size={18} /></button>
-                <button onClick={() => handleDelete(p.id)} className="p-2 text-slate-400 hover:text-rose-600"><Trash2 size={18} /></button>
+              <div className="flex gap-4">
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleEdit(p); }}
+                  className="p-3 text-slate-400 hover:text-indigo-600 transition-colors"
+                  title="編輯"
+                >
+                  <Edit2 size={20} />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleDelete(p.id); }}
+                  className="p-3 text-slate-400 hover:text-rose-600 transition-colors"
+                  title="刪除"
+                >
+                  <Trash2 size={20} />
+                </button>
               </div>
             </Card>
           ))}
@@ -1876,6 +1945,13 @@ const EditEmergencyView = ({ onBack, user, selectedId }: { onBack: () => void, u
     if (selectedId) {
       safeFetch(`/api/elderly-profile/${selectedId}`, setElderly);
     }
+    const interval = setInterval(() => {
+      fetchContacts();
+      if (selectedId) {
+        safeFetch(`/api/elderly-profile/${selectedId}`, setElderly);
+      }
+    }, 10000); // 10秒同步一次
+    return () => clearInterval(interval);
   }, [user?.id, selectedId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -2145,6 +2221,46 @@ export default function App() {
     setAuthChecked(true);
   }, []);
 
+  // --- 背景 GPS 定位同步 (協助更新長輩位置) ---
+  useEffect(() => {
+    // 只有在登入且選中了長輩時才執行
+    if (!user || !selectedElderlyId) return;
+
+    let watchId: number | null = null;
+
+    const sendLocation = async (lat: number, lng: number) => {
+      try {
+        await fetch('/api/gps-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            elderly_id: selectedElderlyId,
+            latitude: lat,
+            longitude: lng,
+            address: "家屬端協助定位"
+          })
+        });
+      } catch (err) {
+        console.warn("Guardian GPS reporting failed", err);
+      }
+    };
+
+    if ("geolocation" in navigator) {
+      // 監控位置變動
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          sendLocation(pos.coords.latitude, pos.coords.longitude);
+        },
+        (err) => console.warn("Guardian GPS Watch Error", err),
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+      );
+    }
+
+    return () => {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    };
+  }, [user, selectedElderlyId]);
+
   const renderView = () => {
     if (!user) return <LoginView onLoginSuccess={setUser} />;
 
@@ -2155,7 +2271,7 @@ export default function App() {
       case 'gps': return <GPSView onBack={() => setCurrentView('dashboard')} selectedId={selectedElderlyId} />;
       case 'profile': return <ProfileView onBack={() => setCurrentView('dashboard')} onNavigate={setCurrentView} user={user} />;
       case 'edit-profile': return <EditProfileView onBack={() => setCurrentView('profile')} user={user} />;
-      case 'edit-elderly': return <EditElderlyView onBack={() => setCurrentView('profile')} user={user} />;
+      case 'edit-elderly': return <EditElderlyView onBack={() => setCurrentView('profile')} user={user} selectedId={selectedElderlyId} onSelectId={setSelectedElderlyId} />;
       case 'edit-emergency': return <EditEmergencyView onBack={() => setCurrentView('profile')} user={user} selectedId={selectedElderlyId} />;
       default: return <Dashboard onNavigate={setCurrentView} selectedId={selectedElderlyId} onSelectId={(id) => {
         setSelectedElderlyId(id);

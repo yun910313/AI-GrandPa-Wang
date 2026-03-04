@@ -9,7 +9,7 @@ export class VitalSignRepository {
         let pool;
         try {
             pool = await ConnectionFactory.createConnection();
-            let query = 'SELECT id, elderly_id, CAST(timestamp AS VARCHAR) as timestamp, heart_rate, systolic, diastolic, blood_oxygen, temperature, steps FROM vital_signs';
+            let query = 'SELECT id, elderly_id, CONVERT(VARCHAR(33), timestamp, 126) as timestamp, heart_rate, systolic, diastolic, blood_oxygen, temperature, steps FROM vital_signs';
 
             const request = pool.request();
             if (elderlyId) {
@@ -54,7 +54,7 @@ export class VitalSignRepository {
                 SELECT 
                     (SELECT TOP 1 id FROM vital_signs WHERE elderly_id = @elderlyId ORDER BY timestamp DESC) as id,
                     @elderlyId as elderly_id,
-                    (SELECT TOP 1 CAST(timestamp AS VARCHAR) FROM vital_signs WHERE elderly_id = @elderlyId ORDER BY timestamp DESC) as timestamp,
+                    (SELECT TOP 1 CONVERT(VARCHAR(33), timestamp, 126) FROM vital_signs WHERE elderly_id = @elderlyId ORDER BY timestamp DESC) as timestamp,
                     (SELECT TOP 1 heart_rate FROM vital_signs WHERE elderly_id = @elderlyId AND heart_rate IS NOT NULL ORDER BY timestamp DESC) as heart_rate,
                     (SELECT TOP 1 systolic FROM vital_signs WHERE elderly_id = @elderlyId AND systolic IS NOT NULL ORDER BY timestamp DESC) as systolic,
                     (SELECT TOP 1 diastolic FROM vital_signs WHERE elderly_id = @elderlyId AND diastolic IS NOT NULL ORDER BY timestamp DESC) as diastolic,

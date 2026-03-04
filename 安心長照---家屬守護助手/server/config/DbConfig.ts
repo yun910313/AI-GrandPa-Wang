@@ -1,7 +1,7 @@
 // ⚠️ 使用函式動態讀取，避免 ES Module import hoisting 造成 dotenv 未載入的問題
 export function getDbConfig() {
     return {
-        server: process.env.DB_SERVER || '192.168.1.107',
+        server: process.env.DB_SERVER || 'localhost',
         database: process.env.DB_DATABASE || 'Granpa Wang',
         user: process.env.DB_USER || 'sqlserver',
         password: process.env.DB_PASSWORD || 'sqlserver',

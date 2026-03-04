@@ -15,22 +15,28 @@ const LiveVoiceChat: React.FC<LiveVoiceChatProps> = ({ onBack }) => {
   const [userSpeech, setUserSpeech] = useState<string>('');
   const [isConnecting, setIsConnecting] = useState(false);
   const [isAiSpeaking, setIsAiSpeaking] = useState(false);
+  const [isUserSpeaking, setIsUserSpeaking] = useState(false);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const outputAudioContextRef = useRef<AudioContext | null>(null);
   const sessionRef = useRef<any>(null);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const nextStartTimeRef = useRef<number>(0);
+  const userSpeakingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const speak = useCallback((text: string) => {
+  const speak = useCallback((text: string, ignoreCancel = false) => {
     if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
+      if (!ignoreCancel) {
+        window.speechSynthesis.cancel();
+      }
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'zh-TW';
-      utterance.rate = 1.0;
+      utterance.rate = 1.3;
       window.speechSynthesis.speak(utterance);
     }
   }, []);
+
+  const hasSpokenWelcome = useRef(false);
 
   // 進入頁面時的語音提示
   useEffect(() => {
@@ -39,8 +45,16 @@ const LiveVoiceChat: React.FC<LiveVoiceChatProps> = ({ onBack }) => {
         ? '王爺爺你好！點一下螢幕中間我的頭像，就可以跟我聊天囉。'
         : '王爺爺您好！點擊螢幕中間我的頭像，就可以跟我聊天囉。';
       setTranscription(msg);
-      // 稍微延遲播放，確保使用者已準備好
-      const timer = setTimeout(() => speak(msg), 800);
+
+      // 如果是第一次載入組件（通常來自導航），延遲長一點等待導航語音播完
+      // 如果是後續切換語言，則立即回應 (delay = 0)
+      const delay = hasSpokenWelcome.current ? 0 : 2000;
+
+      const timer = setTimeout(() => {
+        speak(msg, true); // 進入頁面的歡迎語不應互相打斷
+        hasSpokenWelcome.current = true;
+      }, delay);
+
       return () => clearTimeout(timer);
     }
   }, [selectedLanguage, isActive, isConnecting, speak]);
@@ -87,9 +101,19 @@ const LiveVoiceChat: React.FC<LiveVoiceChatProps> = ({ onBack }) => {
     if (isActive || isConnecting) return;
     try {
       setIsConnecting(true);
+
+      // 1. 立即語音回饋，消除連線期間的沈默 (消除 5 秒等待感)
+      const connectingMsg = selectedLanguage === 'minnan' ? '正在連線，請等一下。' : '正在連線中，請等我一下喔。';
+      speak(connectingMsg);
+
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       const outputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+
+      // 【關鍵修復】解決瀏覽器音訊限制，確保第一次聊天就有聲音
+      await inputCtx.resume();
+      await outputCtx.resume();
+
       audioContextRef.current = inputCtx;
       outputAudioContextRef.current = outputCtx;
 
@@ -108,6 +132,9 @@ const LiveVoiceChat: React.FC<LiveVoiceChatProps> = ({ onBack }) => {
           onopen: () => {
             setIsActive(true);
             setIsConnecting(false);
+            const readyMsg = selectedLanguage === 'minnan' ? '我準備好了，請講。' : '我準備好了，請說話。';
+            speak(readyMsg, true); // 連線成功立即主動提醒，消除 5 秒空等感
+
             setTranscription('我準備好了！您可以開始對我說話囉。');
             const source = inputCtx.createMediaStreamSource(stream);
             const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
@@ -119,8 +146,26 @@ const LiveVoiceChat: React.FC<LiveVoiceChatProps> = ({ onBack }) => {
             scriptProcessor.connect(inputCtx.destination);
           },
           onmessage: async (msg: LiveServerMessage) => {
-            if (msg.serverContent?.inputTranscription) setUserSpeech(prev => prev + msg.serverContent!.inputTranscription!.text);
-            if (msg.serverContent?.outputTranscription) setTranscription(prev => (prev.includes('連線') || prev.includes('點擊') ? '' : prev) + msg.serverContent!.outputTranscription!.text);
+            if (msg.serverContent?.inputTranscription) {
+              // 視覺回饋：偵測到長輩發言
+              setIsUserSpeaking(true);
+              if (userSpeakingTimeoutRef.current) clearTimeout(userSpeakingTimeoutRef.current);
+              userSpeakingTimeoutRef.current = setTimeout(() => setIsUserSpeaking(false), 2000);
+
+              setUserSpeech(prev => prev + msg.serverContent!.inputTranscription!.text);
+              setTranscription(''); // 立即清除舊對話，騰出空間給新回覆
+
+              // 插話 (Barge-in)：停止當前 AI 播放
+              if (sourcesRef.current.size > 0) {
+                sourcesRef.current.forEach(s => s.stop());
+                sourcesRef.current.clear();
+                setIsAiSpeaking(false);
+                nextStartTimeRef.current = outputAudioContextRef.current?.currentTime || 0;
+              }
+              // 同步停止合成語音播放
+              window.speechSynthesis.cancel();
+            }
+            if (msg.serverContent?.outputTranscription) setTranscription(prev => (prev.includes('連線') || prev.includes('點擊') || prev.includes('準備好了') ? '' : prev) + msg.serverContent!.outputTranscription!.text);
             if (msg.serverContent?.turnComplete) setUserSpeech('');
 
             const base64Audio = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
@@ -152,17 +197,32 @@ const LiveVoiceChat: React.FC<LiveVoiceChatProps> = ({ onBack }) => {
     setIsActive(false);
     setIsConnecting(false);
     setIsAiSpeaking(false);
+    setIsUserSpeaking(false);
+    if (userSpeakingTimeoutRef.current) clearTimeout(userSpeakingTimeoutRef.current);
     speak("對話結束囉，祝您有美好的一天！");
+  };
+
+  const handleAvatarClick = () => {
+    if (isConnecting) return;
+    if (!isActive) {
+      startSession();
+    } else {
+      // 已經連線中，點擊頭像提醒長輩說話
+      const msg = selectedLanguage === 'minnan' ? '我在聽，請講。' : '我在聽，請說話。';
+      speak(msg);
+    }
   };
 
   const AIAvatar = () => (
     <button
-      onClick={!isActive ? startSession : undefined}
+      onClick={handleAvatarClick}
       disabled={isConnecting}
-      className={`relative w-80 h-80 flex items-center justify-center transition-all focus:outline-none ${!isActive && !isConnecting ? 'cursor-pointer hover:scale-105 active:scale-95' : 'cursor-default'}`}
+      className={`relative w-80 h-80 flex items-center justify-center transition-all focus:outline-none ${!isConnecting ? 'cursor-pointer hover:scale-105 active:scale-95' : 'cursor-default'}`}
     >
       {/* 呼吸感背景 */}
-      <div className={`absolute inset-0 rounded-full blur-3xl transition-all duration-1000 ${isActive ? (isAiSpeaking ? 'bg-orange-400 opacity-40 scale-125' : 'bg-blue-400 opacity-20 scale-110') : 'bg-slate-200 opacity-20 scale-100'
+      <div className={`absolute inset-0 rounded-full blur-3xl transition-all duration-1000 ${isActive
+        ? (isUserSpeaking ? 'bg-emerald-400 opacity-40 scale-125' : (isAiSpeaking ? 'bg-orange-400 opacity-40 scale-125' : 'bg-blue-400 opacity-20 scale-110'))
+        : 'bg-slate-200 opacity-20 scale-100'
         }`}></div>
 
       {/* 動態外環 */}
@@ -171,8 +231,8 @@ const LiveVoiceChat: React.FC<LiveVoiceChatProps> = ({ onBack }) => {
 
       {/* 主頭像球體 */}
       <div className={`relative w-64 h-64 rounded-full shadow-2xl transition-all duration-500 flex flex-col items-center justify-center overflow-hidden ${isActive
-          ? (isAiSpeaking ? 'bg-gradient-to-br from-blue-600 via-orange-400 to-rose-400 scale-110 ring-8 ring-orange-50' : 'bg-gradient-to-br from-slate-700 to-blue-900 scale-105')
-          : isConnecting ? 'bg-slate-400 animate-pulse' : 'bg-gradient-to-br from-blue-500 to-indigo-600 scale-100 hover:shadow-blue-200 shadow-xl'
+        ? (isUserSpeaking ? 'bg-gradient-to-br from-emerald-500 to-teal-700 scale-110 ring-8 ring-emerald-50' : (isAiSpeaking ? 'bg-gradient-to-br from-blue-600 via-orange-400 to-rose-400 scale-110 ring-8 ring-orange-50' : 'bg-gradient-to-br from-slate-700 to-blue-900 scale-105'))
+        : isConnecting ? 'bg-slate-400 animate-pulse' : 'bg-gradient-to-br from-blue-500 to-indigo-600 scale-100 hover:shadow-blue-200 shadow-xl'
         }`}>
         <div className="absolute inset-0 bg-white/5 backdrop-blur-[2px]"></div>
 

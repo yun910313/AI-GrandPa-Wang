@@ -4,6 +4,19 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
+import os from "os";
+
+function getNetworkAddress() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name] || []) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return 'localhost';
+}
 
 // Load environment variables
 dotenv.config();
@@ -318,8 +331,9 @@ async function startServer() {
     try {
       const success = await elderlyRepo.delete(req.params.id);
       res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ error: "Internal Server Error" });
+    } catch (error: any) {
+      console.error("DELETE /api/elderly-profile/:id error:", error);
+      res.status(500).json({ success: false, message: error.message || "伺服器內部錯誤" });
     }
   });
 
@@ -330,6 +344,17 @@ async function startServer() {
       res.json(contacts);
     } catch (error) {
       res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  app.post("/api/emergency-contacts/sync-all", async (req, res) => {
+    try {
+      const { elderly_id, contacts } = req.body;
+      const success = await contactRepo.syncAll(elderly_id, contacts);
+      res.json({ success });
+    } catch (error: any) {
+      console.error("Error syncing contacts:", error);
+      res.status(500).json({ success: false, message: error.message });
     }
   });
 
@@ -386,11 +411,12 @@ async function startServer() {
     });
   }
 
+  const networkAddress = getNetworkAddress();
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`================================================`);
     console.log(`🚀 伺服器啟動成功！「環境已合併」`);
     console.log(`🏠 Local:   http://localhost:${PORT}`);
-    console.log(`🌐 Network: http://192.168.1.107:${PORT} (手機請開此網址)`);
+    console.log(`🌐 Network: http://${networkAddress}:${PORT} (手機請開此網址)`);
     console.log(`📁 專案目錄: 安心長照---家屬守護助手`);
     console.log(`================================================`);
   });

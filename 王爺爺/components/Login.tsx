@@ -112,8 +112,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, speak }) => {
                         type="submit"
                         disabled={loading}
                         className={`w-full py-5 rounded-2xl text-white text-2xl font-black shadow-xl transition-all active:scale-95 ${loading
-                                ? 'bg-slate-300 shadow-none'
-                                : 'bg-blue-600 hover:bg-blue-700 shadow-blue-200'
+                            ? 'bg-slate-300 shadow-none'
+                            : 'bg-blue-600 hover:bg-blue-700 shadow-blue-200'
                             }`}
                     >
                         {loading ? (

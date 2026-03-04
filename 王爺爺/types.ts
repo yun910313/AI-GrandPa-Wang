@@ -43,6 +43,7 @@ export interface VitalSigns {
   diastolic: number;
   blood_oxygen: number;
   temperature: number;
+  steps: number;
 }
 
 export interface DoctorNote {
@@ -77,7 +78,7 @@ export interface ElderlyProfile {
 }
 
 export interface EmergencyContact {
-  id: number;
+  id: any;
   name: string;
   relationship: string;
   phone: string;

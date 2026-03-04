@@ -5,6 +5,19 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
+import os from "os";
+
+function getNetworkAddress() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name] || []) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return 'localhost';
+}
 
 // Load environment variables
 dotenv.config();
@@ -17,6 +30,7 @@ import MedicationRepository from "./repositories/MedicationRepository.js";
 import MedicationLogRepository from "./repositories/MedicationLogRepository.js";
 import EmergencyContactRepository from "./repositories/EmergencyContactRepository.js";
 import VitalSignRepository from "./repositories/VitalSignRepository.js";
+import GPSLogRepository from "./repositories/GPSLogRepository.js";
 
 // Services
 import UserService from "./services/UserService.js";
@@ -28,6 +42,7 @@ const medicationRepo = new MedicationRepository();
 const medLogRepo = new MedicationLogRepository();
 const contactRepo = new EmergencyContactRepository();
 const vitalRepo = new VitalSignRepository();
+const gpsRepo = new GPSLogRepository();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -409,6 +424,86 @@ async function startServer() {
     }
   });
 
+  app.post("/api/medication/ai-command", async (req, res) => {
+    try {
+      const { command, meds } = req.body;
+      console.log(`[AI-Command] 收到指令: "${command}", 藥物數量: ${meds?.length}`);
+      const apiKey = process.env.GEMINI_API_KEY;
+
+      if (!apiKey) {
+        console.error("[AI-Command] 失敗: 找不到 GEMINI_API_KEY");
+        return res.status(500).json({ error: "伺服器未設定 GEMINI_API_KEY" });
+      }
+
+      const genAI = new GoogleGenAI({ apiKey });
+      const currentStatus = meds.map((m: any) => `[ID:${m.id}] ${m.name}(時間:${m.reminder_time}, 狀態:${m.is_taken === 1 ? '已標記吃過' : '還沒吃'})`).join(', ');
+
+      const prompt = `
+        你是一位極其親切、溫暖、有耐心的「銀髮族暖心管家」。
+        目前藥物清單：${currentStatus}。
+        使用者剛才說：「${command}」。
+
+        任務：
+        1. 意圖辨識：判斷使用者是否表示藥吃完了、詢問還有什麼藥、或是純問候。
+        2. 模糊比對：從清單中找出最接近的項目。
+        3. 溫暖回覆：給予讚美與關心。
+
+        意圖分類：
+        - "complete_one": 標記某項藥物已服用。
+        - "complete_all":標記目前所有「還沒吃」的藥物都已服用。
+        - "check_status": 詢詢還有哪些藥要吃。
+        - "none": 純聊天或無法辨識。
+
+        回傳格式必須為 JSON：
+        {
+          "reply": "（繁體中文）溫暖回覆",
+          "action": "complete_one" | "complete_all" | "check_status" | "none",
+          "targetId": "藥物ID" | null
+        }
+      `;
+
+      console.log("[AI-Command] 正在請求 Gemini...");
+      const response = await genAI.models.generateContent({
+        model: 'gemini-1.5-flash',
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: { responseMimeType: "application/json" }
+      });
+
+      console.log("[AI-Command] Gemini 回應成功");
+      const result = JSON.parse(response.text || '{}');
+      res.json(result);
+    } catch (error: any) {
+      console.error("[AI-Command] 發生錯誤:", error.message);
+      res.status(error.status || 500).json({
+        error: "AI 處理失敗",
+        details: error.message,
+        suggestion: error.message?.includes("403") ? "API 金鑰似乎失效了，請檢查 .env 檔案並更新" : "伺服器忙碌中，請稍後再試"
+      });
+    }
+  });
+
+  // GPS Log Routes
+  app.get("/api/gps-latest", async (req, res) => {
+    try {
+      const { elderly_id } = req.query;
+      const latest = await gpsRepo.findLatest(elderly_id as string);
+      res.json(latest);
+    } catch (error) {
+      console.error("Error fetching GPS data:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  app.post("/api/gps-log", async (req, res) => {
+    try {
+      const id = await gpsRepo.create(req.body);
+      res.json({ success: true, id });
+    } catch (error) {
+      console.error("Error creating GPS log:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
   // Vision Assistant API (Gemini Proxy)
   app.post("/api/vision/analyze", async (req, res) => {
     try {
@@ -423,7 +518,9 @@ async function startServer() {
       }
 
       const genAI = new GoogleGenAI({ apiKey });
-      const prompt = modePrompt + "\n請以繁體中文回答，內容要精簡，僅列出關鍵重點，不要超過 150 字。分為【重點摘要】與【溫馨提醒】兩個部分。語氣要溫和。";
+      const currentTimeStr = new Date().toLocaleTimeString('zh-TW');
+      const prompt = modePrompt + `\n目前系統時間：${currentTimeStr}\n請以繁體中文回答，內容要精簡，務必根據「當前這張照片的具體細節」回答，不要給出籠統或重複的答案。
+分為【大意】與【溫馨提醒】兩個部分。大意部分僅列出關鍵重點，總字數不要超過 150 字。語氣要溫和、對長輩友善。`;
 
       const analyzeWithModel = async (modelName: string) => {
         console.log(`[Vision] 正在嘗試模型: ${modelName}...`);
@@ -520,11 +617,12 @@ async function startServer() {
     });
   }
 
+  const networkAddress = getNetworkAddress();
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`================================================`);
     console.log(`🚀 伺服器啟動成功！「環境已合併」`);
     console.log(`🏠 Local:   http://localhost:${PORT}`);
-    console.log(`🌐 Network: http://192.168.1.107:${PORT} (手機請開此網址)`);
+    console.log(`🌐 Network: http://${networkAddress}:${PORT} (手機請開此網址)`);
     console.log(`📁 專案目錄: 王爺爺`);
     console.log(`================================================`);
   });
